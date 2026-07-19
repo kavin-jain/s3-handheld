@@ -34,6 +34,7 @@
 #include "wof.h"
 #include "usage_fmt.h"
 #include "df_logic.h"
+#include "ui_edit.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -181,7 +182,7 @@ static const Category CATS[] = {
 static const uint8_t N_CATS = sizeof(CATS) / sizeof(CATS[0]);
 
 // ---------------------------------------------------------------- nav + input
-enum ScreenT : uint8_t { SCR_HOME, SCR_AROUND, SCR_CATEGORY, SCR_TOOL, SCR_SETTINGS };
+enum ScreenT : uint8_t { SCR_HOME, SCR_AROUND, SCR_CATEGORY, SCR_TOOL, SCR_SETTINGS, SCR_EDIT_BRIGHT };
 struct NavEntry { ScreenT t; int8_t cat; int8_t tool; };
 static NavEntry nav_stack[8];
 static uint8_t  nav_depth = 0;
@@ -208,6 +209,20 @@ static void bl_write(uint8_t duty) {
 #else
   ledcWrite(BL_LEDC_CH, duty);
 #endif
+}
+
+// ---- encoder value-editing (Settings) ----
+// When g_edit_val is non-null, encoder rotation changes *g_edit_val instead of
+// moving list focus. Cleared on every screen change (render_top).
+static int  g_bright_pct = 100;
+static int *g_edit_val = nullptr;
+static int  g_edit_min, g_edit_max, g_edit_step;
+static void (*g_edit_cb)(int) = nullptr;
+static lv_obj_t *g_edit_label = nullptr;
+
+static void apply_brightness(int pct) {
+  bl_user_duty = (uint8_t)(pct * 255 / 100);
+  bl_write(bl_user_duty);
 }
 
 static void pm_wake() {                        // -> ACTIVE (called on any input)
@@ -260,7 +275,17 @@ static void enc_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
   int32_t diff  = enc_accum - consumed;
   int32_t steps = diff / ENC_STEPS_PER_DETENT;
   if (steps != 0) { consumed += steps * ENC_STEPS_PER_DETENT; pm_wake(); }
-  data->enc_diff = steps;
+  if (g_edit_val && steps) {                    // edit mode: rotation changes a value
+    int nv = edit_apply(*g_edit_val, steps, g_edit_min, g_edit_max, g_edit_step);
+    if (nv != *g_edit_val) {
+      *g_edit_val = nv;
+      if (g_edit_cb) g_edit_cb(nv);
+      if (g_edit_label) lv_label_set_text_fmt(g_edit_label, "%d%%", nv);
+    }
+    data->enc_diff = 0;                          // don't move list focus while editing
+  } else {
+    data->enc_diff = steps;
+  }
   data->state = g_enc_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
@@ -410,6 +435,7 @@ static void build_around();
 static void build_category(int c);
 static void build_tool(int c, int i);
 static void build_settings();
+static void build_edit_bright();
 
 static lv_obj_t *new_screen(const char *title) {
   lv_group_remove_all_objs(g_group);          // detach old (about to be deleted)
@@ -827,12 +853,27 @@ static void build_tool(int c, int i) {
   load_screen(scr);
 }
 
+static void build_edit_bright() {
+  lv_obj_t *scr = new_screen("BRIGHTNESS");
+  section(scr, "ROTATE TO CHANGE - BACK TO SAVE");
+  lv_obj_t *box = content_box(scr);
+  lv_obj_t *p = panel(box);
+  g_edit_label = make_label(p, "", &lv_font_montserrat_28, C_GREEN);
+  lv_label_set_text_fmt(g_edit_label, "%d%%", g_bright_pct);
+  make_label(p, "screen backlight", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "needs the BL mod to take effect", &lv_font_unscii_8, C_MUTE);
+  load_screen(scr);
+  g_edit_val = &g_bright_pct;                    // enable edit mode (render_top cleared it)
+  g_edit_min = 10; g_edit_max = 100; g_edit_step = 10;
+  g_edit_cb = apply_brightness;
+}
+
 static void build_settings() {
   lv_obj_t *scr = new_screen("SETTINGS");
   lv_obj_t *list = make_list(scr);
   char buf[40];
-  snprintf(buf, sizeof(buf), "%d %%  (needs BL mod)", (bl_user_duty * 100) / 255);
-  add_row(list, "BRT", C_GREEN, "Brightness", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  snprintf(buf, sizeof(buf), "%d %%  (rotate to change)", g_bright_pct);
+  add_row(list, "BRT", C_GREEN, "Brightness", buf, NULL, 0, 0, nav_code(SCR_EDIT_BRIGHT, 0, 0));
   snprintf(buf, sizeof(buf), "dim %ds  sleep %ds", DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000);
   add_row(list, "PWR", C_GREEN, "Sleep timers", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
   add_row(list, "THM", C_GREEN, "Theme", "phosphor green", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
@@ -848,13 +889,16 @@ static void build_settings() {
 
 // ---------------------------------------------------------------- nav engine
 static void render_top() {
+  g_edit_val = nullptr;                           // leaving any screen exits edit mode
+  g_edit_label = nullptr;
   NavEntry &e = nav_stack[nav_depth - 1];
   switch (e.t) {
-    case SCR_HOME:     build_home();               break;
-    case SCR_AROUND:   build_around();             break;
-    case SCR_CATEGORY: build_category(e.cat);      break;
-    case SCR_TOOL:     build_tool(e.cat, e.tool);  break;
-    case SCR_SETTINGS: build_settings();           break;
+    case SCR_HOME:        build_home();               break;
+    case SCR_AROUND:      build_around();             break;
+    case SCR_CATEGORY:    build_category(e.cat);      break;
+    case SCR_TOOL:        build_tool(e.cat, e.tool);  break;
+    case SCR_SETTINGS:    build_settings();           break;
+    case SCR_EDIT_BRIGHT: build_edit_bright();        break;
   }
 }
 static void nav_push(ScreenT t, int cat, int tool) {
