@@ -1366,8 +1366,7 @@ static void tool_deauth_atk(lv_obj_t *box) {     // WiFi > Deauth (authorized)
   deauth_frame(bcast, bssid, 7, f);              // demo frame the tool would send
   make_label(p, "DEAUTH", &lv_font_unscii_8, C_AMBER);
   make_label(p, "kick a client off an AP", &lv_font_montserrat_16, C_TXT);
-  char hx[40]; snprintf(hx, sizeof hx, "FC %02X%02X   reason %d", f[0], f[1], f[24]);
-  make_label(p, hx, &lv_font_unscii_8, C_SUB);
+  make_label(p, "deauth + disassoc, both directions", &lv_font_unscii_8, C_SUB);
   make_label(p, "YOUR OWN NETWORK ONLY", &lv_font_montserrat_14, C_AMBER);
   make_label(box, "pick AP + client, click to send - TX bring-up",
              &lv_font_unscii_8, C_MUTE);

