@@ -15,6 +15,8 @@
 #include "driver/gpio.h"
 #include "pins.h"
 #include "storage.h"
+#include "radio_cc1101.h"
+#include "subghz_classify.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -484,16 +486,34 @@ static lv_obj_t *panel(lv_obj_t *box) {
 }
 
 static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
+  // Preset ISM spots covering the common sub-GHz remote/sensor bands.
+  static const float FREQS[] = {300.0f, 315.0f, 390.0f, 433.92f, 868.0f, 915.0f};
+  const int N = sizeof(FREQS) / sizeof(FREQS[0]);
+
+  bool live = cc1101_present();
+  float peak_mhz = 433.92f;   // demo fallback when no radio is attached
+  int   peak_rssi = -42;
+  if (live) {
+    int rssi[N];
+    int bi = cc1101_sweep(FREQS, N, rssi);
+    if (bi >= 0) { peak_mhz = FREQS[bi]; peak_rssi = rssi[bi]; }
+  }
+
   lv_obj_t *p = panel(box);
-  make_label(p, "433.92", &lv_font_montserrat_28, C_GREEN);
-  make_label(p, "MHz  -  strongest signal", &lv_font_unscii_8, C_SUB);
+  char mhz[16]; snprintf(mhz, sizeof mhz, "%.2f", peak_mhz);
+  make_label(p, mhz, &lv_font_montserrat_28, C_GREEN);
+  char sub[40]; snprintf(sub, sizeof sub, "MHz  -  %d dBm", peak_rssi);
+  make_label(p, sub, &lv_font_unscii_8, C_SUB);
+
   lv_obj_t *bar = lv_bar_create(p);
   lv_obj_set_size(bar, lv_pct(100), 10);
   lv_obj_set_style_bg_color(bar, lv_color_hex(C_LINE), LV_PART_MAIN);
   lv_obj_set_style_bg_color(bar, lv_color_hex(C_GREEN), LV_PART_INDICATOR);
-  lv_bar_set_value(bar, 72, LV_ANIM_OFF);
-  make_label(p, "Car key fob  -  rolling code", &lv_font_montserrat_16, C_TXT);
-  make_label(p, "can't copy: code changes every press", &lv_font_montserrat_14, C_RED);
+  lv_bar_set_value(bar, sg_bar_pct(peak_rssi), LV_ANIM_OFF);
+
+  make_label(p, sg_guess(peak_mhz), &lv_font_montserrat_16, C_TXT);
+  make_label(p, live ? "strongest signal in range" : "demo - CC1101 not detected",
+             &lv_font_montserrat_14, live ? C_GREEN_SFT : C_AMBER);
   make_label(box, "rotate = sweep    click = lock", &lv_font_unscii_8, C_MUTE);
 }
 
@@ -630,6 +650,10 @@ void setup() {
   storage_begin();
   Serial.printf("[sd] %s (%lu/%lu MB)\n", storage_ready() ? "mounted" : "no card",
                 (unsigned long)storage_used_mb(), (unsigned long)storage_total_mb());
+
+  cc1101_begin();
+  Serial.printf("[cc1101] %s (ver 0x%02x)\n", cc1101_present() ? "present" : "absent",
+                cc1101_present() ? cc1101_version() : 0);
 
   lv_init();
   lv_disp_draw_buf_init(&draw_buf, buf1, NULL, SCR_W * 40);
