@@ -20,6 +20,8 @@
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
 #include "ir_remote.h"
+#include "wifi_scan.h"
+#include "wifi_fmt.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -543,6 +545,27 @@ static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   }
 }
 
+static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
+  lv_obj_t *p = panel(box);
+  int n = wifi_count();
+  if (n <= 0) n = wifi_scan();                   // first entry: one ~2 s scan, then cached
+  if (n <= 0) {
+    make_label(p, "WIFI SCAN", &lv_font_unscii_8, C_GREEN);
+    make_label(p, "no networks found", &lv_font_montserrat_16, C_SUB);
+    return;
+  }
+  char h[24]; snprintf(h, sizeof h, "%d networks", n);
+  make_label(p, h, &lv_font_unscii_8, C_GREEN);
+  int show = n < 5 ? n : 5;
+  for (int i = 0; i < show; i++) {
+    int enc = wifi_enc(i);
+    char line[72];
+    snprintf(line, sizeof line, "%s  %s  %d dBm", wifi_ssid(i), wifi_enc_str(enc), wifi_rssi(i));
+    make_label(p, line, &lv_font_montserrat_14, wifi_is_open(enc) ? C_RED : C_TXT);
+  }
+  make_label(box, "click = rescan    red = open network", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   lv_obj_t *p = panel(box);
   make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
@@ -582,6 +605,7 @@ static void build_tool(int c, int i) {
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
+  else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else                       tool_generic(box, t);
   load_screen(scr);

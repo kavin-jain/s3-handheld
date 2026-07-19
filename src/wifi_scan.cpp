@@ -1,0 +1,26 @@
+#include "wifi_scan.h"
+#include <WiFi.h>
+
+// ponytail: synchronous scan blocks ~2 s (freezes the UI once per entry). Fine for
+// a first cut; move to async WiFi.scanNetworks(true) + a refresh timer if it annoys.
+static bool s_begun = false;
+static int  s_count = 0;
+
+static void ensure_begin() {
+  if (!s_begun) { WiFi.mode(WIFI_STA); WiFi.disconnect(); s_begun = true; }
+}
+
+void wifi_begin() { ensure_begin(); }
+
+int wifi_scan() {
+  ensure_begin();
+  s_count = WiFi.scanNetworks();
+  return s_count;
+}
+
+int wifi_count() { return s_count; }
+
+const char *wifi_ssid(int i) { static String s; s = WiFi.SSID(i); return s.c_str(); }
+int wifi_rssi(int i) { return WiFi.RSSI(i); }
+int wifi_chan(int i) { return WiFi.channel(i); }
+int wifi_enc(int i)  { return (int)WiFi.encryptionType(i); }
