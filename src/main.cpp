@@ -779,6 +779,19 @@ static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   }
 }
 
+static lv_obj_t *g_wifi_status = nullptr;         // WiFi scan -> CSV save status
+
+static void wifi_save_action() {
+  char body[512];
+  int o = 0, n = wifi_count();
+  for (int i = 0; i < n && o < (int)sizeof body - 80; i++)
+    o += snprintf(body + o, sizeof body - o, "%s,%s,%d,%d\n", wifi_ssid(i),
+                  wifi_enc_str(wifi_enc(i)), wifi_chan(i), wifi_rssi(i));
+  const char *path = storage_save(SAVE_WIFI, "csv", (const uint8_t *)body, (size_t)o);
+  if (g_wifi_status)
+    lv_label_set_text(g_wifi_status, (path && path[0]) ? path : "no SD card");
+}
+
 static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
   lv_obj_t *p = panel(box);
   int n = wifi_count();
@@ -797,7 +810,9 @@ static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
     snprintf(line, sizeof line, "%s  %s  %d dBm", wifi_ssid(i), wifi_enc_str(enc), wifi_rssi(i));
     make_label(p, line, &lv_font_montserrat_14, wifi_is_open(enc) ? C_RED : C_TXT);
   }
-  make_label(box, "click = rescan    red = open network", &lv_font_unscii_8, C_MUTE);
+  g_wifi_status = make_label(p, "ACTION = save list to /wifi", &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(box, "ACTION saves CSV    click = rescan", &lv_font_unscii_8, C_MUTE);
+  g_action_cb = wifi_save_action;
 }
 
 static void tool_csi(lv_obj_t *box) {            // See invisible > See through wall
