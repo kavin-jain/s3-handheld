@@ -8,16 +8,25 @@ the device says *what* a signal is in plain language, with the real MHz/hex one 
 > Personal security-research device. Use only against hardware and networks you own or are
 > authorized to test. No jammers, no rolling-code theft — see the capability matrix.
 
-## Build & flash
+## Build, test & flash
 
 ```bash
-pio run                                    # compile
+bash test/run_all.sh                       # run every host test 2x (pure logic)
+pio run                                     # compile
 pio run -t upload && pio device monitor    # flash + serial (115200)
 ```
 
 PlatformIO + Arduino-ESP32. All driver libraries are pulled via `platformio.ini` `lib_deps`
-(nothing is vendored). IR/NFC databases live in `assets/` (gitignored; curated onto the SD card
-at build time).
+(nothing is vendored).
+
+### First boot (plug-and-play)
+1. Flash, insert a FAT32 microSD. Captures auto-save to `/subghz /nfc /ir /wifi /badusb`;
+   settings persist to `/config.txt`.
+2. Drop a Flipper IR database (the CC0 [Flipper-IRDB](https://github.com/Lucaslhm/Flipper-IRDB),
+   or your own Flipper's SD) under `/ir` — the universal remote reads it (`flipper_ir.h`).
+3. **Settings → Intensity** sets TX power for *every* radio: Low / Medium / **Max** (default).
+   Max can exceed local ISM/WiFi power limits — run only where you're permitted.
+4. Controls: rotary = move/adjust · click = select · BACK / HOME / ACTION (ACTION saves a capture).
 
 ## Architecture
 
