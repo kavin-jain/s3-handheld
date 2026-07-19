@@ -74,6 +74,13 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 - ☐ ESP-NOW mesh exchanges a message with a second unit.
 - ☐ Phone BLE bridge feeds usage / calendar (iCal) / tasks to the device.
 
+## Max-power config (green-zone attacks run the radios at their hardware limit)
+- ☐ CC1101 setPA(12) = +12 dBm on the async TX (replay). Confirm range vs default.
+- ☐ NRF24 RF24_PA_MAX + 2 Mbps + autoack/CRC off (promiscuous). Add a PA/LNA module for more.
+- ☐ WiFi esp_wifi_set_max_tx_power(84) ≈ 20.5 dBm on scan + deauth.
+- ⚠ REGULATORY: max chip power can exceed local ISM/WiFi ERP/EIRP limits. Legal to run
+     only where you're licensed/permitted and on your own targets — operator's responsibility.
+
 ## Storage (onboard SD, SPI-A, CS GPIO9)
 - ☐ SD mounts; captures write to /subghz /nfc /ir /wifi and reload.
 - ☐ Save N captures of one kind: filenames increment (0000,0001,...) with no overwrite

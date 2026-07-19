@@ -57,6 +57,9 @@ static void sgx_async(float mhz) {
   ELECHOUSE_cc1101.setCCMode(0);              // async raw serial mode (not packet)
   ELECHOUSE_cc1101.setModulation(2);          // ASK/OOK
   ELECHOUSE_cc1101.setMHZ(mhz);
+  ELECHOUSE_cc1101.setPA(12);                 // MAX TX power (+12 dBm) for replay.
+  // setPA is frequency-dependent, so it must follow setMHZ. NOTE: +12 dBm can
+  // exceed local ISM ERP limits (433/868/915) — legal to run only where allowed.
 }
 
 bool subghz_capture(float mhz, uint32_t timeout_ms,

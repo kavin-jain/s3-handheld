@@ -20,6 +20,12 @@ static void ensure() {
   s_begun = true;
   nrfSPI.begin(PIN_SPIB_SCLK, PIN_SPIB_MISO, PIN_SPIB_MOSI, PIN_NRF24_1_CS);
   s_present = radio.begin(&nrfSPI) && radio.isChipConnected();
+  if (s_present) {
+    radio.setPALevel(RF24_PA_MAX);           // MAX TX power (+ external PA/LNA if fitted)
+    radio.setDataRate(RF24_2MBPS);           // full throughput; drop to 250KBPS for range
+    radio.setAutoAck(false);                 // don't ACK — raw scan/inject
+    radio.setCRCLength(RF24_CRC_DISABLED);   // promiscuous: accept everything
+  }
 }
 
 bool nrf_present() { ensure(); return s_present; }

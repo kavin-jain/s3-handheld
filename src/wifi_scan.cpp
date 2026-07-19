@@ -1,5 +1,6 @@
 #include "wifi_scan.h"
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 // ponytail: synchronous scan blocks ~2 s (freezes the UI once per entry). Fine for
 // a first cut; move to async WiFi.scanNetworks(true) + a refresh timer if it annoys.
@@ -7,7 +8,11 @@ static bool s_begun = false;
 static int  s_count = 0;
 
 static void ensure_begin() {
-  if (!s_begun) { WiFi.mode(WIFI_STA); WiFi.disconnect(); s_begun = true; }
+  if (!s_begun) {
+    WiFi.mode(WIFI_STA); WiFi.disconnect();
+    esp_wifi_set_max_tx_power(84);            // MAX WiFi TX power (~20.5 dBm)
+    s_begun = true;
+  }
 }
 
 void wifi_begin() { ensure_begin(); }
