@@ -41,6 +41,7 @@
 #include "handshake.h"
 #include "wardrive.h"
 #include "buspirate.h"
+#include "fwdump.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -856,6 +857,20 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_fwdump(lv_obj_t *box) {         // Tools > Firmware dump
+  lv_obj_t *p = panel(box);
+  const uint8_t jedec[3] = {0xEF, 0x40, 0x18};   // demo: W25Q128 (Winbond 16 MiB)
+  uint32_t bytes = jedec_capacity_bytes(jedec[2]);
+  make_label(p, "FIRMWARE DUMP", &lv_font_unscii_8, C_GREEN);
+  char id[40]; snprintf(id, sizeof id, "JEDEC %02X %02X %02X", jedec[0], jedec[1], jedec[2]);
+  make_label(p, id, &lv_font_unscii_8, C_SUB);
+  char h[48]; snprintf(h, sizeof h, "%s  -  %lu MB", jedec_manuf(jedec[0]),
+                       (unsigned long)(bytes / (1024 * 1024)));
+  make_label(p, h, &lv_font_montserrat_16, C_TXT);
+  make_label(p, "read chip -> dump.bin on SD", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "clip onto SPI flash - read = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_buspirate(lv_obj_t *box) {      // Tools > Bus Pirate
   lv_obj_t *p = panel(box);
   make_label(p, "I2C SCAN", &lv_font_unscii_8, C_GREEN);
@@ -1088,6 +1103,7 @@ static void build_tool(int c, int i) {
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
   else if (c == 10 && i == 0) tool_buspirate(box);    // Tools / Bench > Bus Pirate
+  else if (c == 10 && i == 1) tool_fwdump(box);       // Tools / Bench > Firmware dump
   else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
