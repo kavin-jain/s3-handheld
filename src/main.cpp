@@ -1004,6 +1004,20 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_rickroll(lv_obj_t *box) {       // Pranks > Rickroll tag
+  lv_obj_t *p = panel(box);
+  const char *url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  uint8_t rec[80], tag[96];
+  size_t rn = ndef_uri_record(url, rec, sizeof rec);
+  size_t tn = ndef_tlv_wrap(rec, rn, tag, sizeof tag);
+  make_label(p, "RICKROLL TAG", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "write an NFC tag -> opens the song", &lv_font_montserrat_16, C_TXT);
+  char h[40]; snprintf(h, sizeof h, "%u-byte NDEF tag ready", (unsigned)tn);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "tap a phone to it, watch the face", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "PN532 tag write = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_hackscreen(lv_obj_t *box) {     // Pranks > Hacker screen
   lv_obj_t *p = panel(box);
   make_label(p, "ACCESS GRANTED", &lv_font_unscii_8, C_GREEN);
@@ -1338,6 +1352,7 @@ static void build_tool(int c, int i) {
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
+  else if (c == 9 && i == 1) tool_rickroll(box);      // Pranks > Rickroll tag
   else if (c == 9 && i == 2) tool_hackscreen(box);    // Pranks > Hacker screen
   else if (c == 9 && i == 4) tool_castcrash(box);     // Pranks > Cast crasher
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon

@@ -37,3 +37,20 @@ static inline size_t ndef_uri_record(const char *url, uint8_t *out, size_t cap) 
   o += urilen;
   return o;
 }
+
+// Wrap an NDEF message in the NFC Forum TLV a tag actually stores in user memory:
+//   0x03 <len> <message...> 0xFE   (short-form length, message < 255 bytes).
+// Returns bytes written, or 0 on overflow/bad args.
+static inline size_t ndef_tlv_wrap(const uint8_t *msg, size_t msglen,
+                                   uint8_t *out, size_t cap) {
+  if (!msg || !out || msglen == 0 || msglen > 254) return 0;
+  size_t total = msglen + 3;                 // 0x03, len, message, 0xFE
+  if (total > cap) return 0;
+  size_t o = 0;
+  out[o++] = 0x03;                           // NDEF Message TLV
+  out[o++] = (uint8_t)msglen;                // length
+  memcpy(out + o, msg, msglen);
+  o += msglen;
+  out[o++] = 0xFE;                           // Terminator TLV
+  return o;
+}
