@@ -18,6 +18,7 @@
 #include "radio_cc1101.h"
 #include "subghz_classify.h"
 #include "subghz_replay.h"
+#include "wmbus.h"
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
 #include "ndef.h"
@@ -587,6 +588,23 @@ static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
   make_label(box, "captures & replays -> SD", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_wmbus(lv_obj_t *box) {          // Sub-GHz > wM-Bus meter
+  lv_obj_t *p = panel(box);
+  // Demo header: manuf ELS (LE 0x93,0x15), 4-byte serial (LE), version, medium.
+  const uint8_t hdr[] = {0x93, 0x15, 0x78, 0x56, 0x34, 0x12, 0x01, 0x07};
+  uint16_t manid = (uint16_t)(hdr[0] | (hdr[1] << 8));
+  char mf[4]; wmbus_manuf(manid, mf);
+
+  make_label(p, "wM-BUS 868.95", &lv_font_unscii_8, C_AMBER);
+  char l1[40]; snprintf(l1, sizeof l1, "%s  -  %s", mf, wmbus_medium(hdr[7]));
+  make_label(p, l1, &lv_font_montserrat_20, C_TXT);
+  char sn[40]; snprintf(sn, sizeof sn, "serial %02X%02X%02X%02X",
+                        hdr[5], hdr[4], hdr[3], hdr[2]);
+  make_label(p, sn, &lv_font_montserrat_14, C_SUB);
+  make_label(p, "demo - CC1101 wM-Bus RX = bring-up", &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "reads utility meters (T/C mode, 868 MHz)", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   lv_obj_t *p = panel(box);
   if (!nfc_present()) {
@@ -897,6 +915,7 @@ static void build_tool(int c, int i) {
   lv_obj_t *box = content_box(scr);
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
   else if (c == 0 && i == 1) tool_subghz_capture(box);// Sub-GHz > Capture & replay
+  else if (c == 0 && i == 5) tool_wmbus(box);         // Sub-GHz > wM-Bus meter
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
   else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
