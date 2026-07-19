@@ -19,6 +19,7 @@
 #include "subghz_classify.h"
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
+#include "ndef.h"
 #include "ir_remote.h"
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
@@ -674,6 +675,20 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_ndef(lv_obj_t *box) {           // RFID/NFC > Write NDEF tag
+  lv_obj_t *p = panel(box);
+  const char *url = "https://github.com/kavin-jain";
+  uint8_t rec[64];
+  size_t n = ndef_uri_record(url, rec, sizeof rec);
+  make_label(p, "WRITE NDEF TAG", &lv_font_unscii_8, C_GREEN);
+  make_label(p, url, &lv_font_montserrat_14, C_TXT);
+  char h[40]; snprintf(h, sizeof h, "NDEF record ready: %u bytes", (unsigned)n);
+  make_label(p, h, &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, nfc_present() ? "tap an NTAG - click to write"
+                              : "demo - PN532 not detected",
+             &lv_font_montserrat_14, C_SUB);
+}
+
 static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
   lv_obj_t *p = panel(box);
   int n = ble_count();
@@ -718,6 +733,7 @@ static void build_tool(int c, int i) {
   lv_obj_t *box = content_box(scr);
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
+  else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
