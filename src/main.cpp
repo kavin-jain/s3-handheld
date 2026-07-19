@@ -17,6 +17,7 @@
 #include "storage.h"
 #include "radio_cc1101.h"
 #include "subghz_classify.h"
+#include "subghz_replay.h"
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
 #include "ndef.h"
@@ -563,6 +564,29 @@ static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
   make_label(box, "rotate = sweep    click = lock", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
+  lv_obj_t *p = panel(box);
+  bool live = cc1101_present();
+  uint32_t code = 0x0015F3; uint8_t bits = 24; int proto = 1;   // demo fallback
+  // ponytail: blocks up to 1.2 s while listening. Fine for bring-up; make it
+  // event-driven if the capture screen ever needs to stay responsive.
+  bool got = live && subghz_capture(433.92f, 1200, &code, &bits, &proto);
+  if (live && !got) {
+    make_label(p, "LISTENING 433.92", &lv_font_unscii_8, C_GREEN);
+    make_label(p, "press a fob near the antenna", &lv_font_montserrat_16, C_TXT);
+    make_label(box, "rotate = band    click = replay", &lv_font_unscii_8, C_MUTE);
+    return;
+  }
+  char h[40]; rcs_fmt(code, bits, proto, h, sizeof h);
+  make_label(p, got ? "CAPTURED" : "DEMO CAPTURE", &lv_font_unscii_8,
+             got ? C_GREEN : C_AMBER);
+  make_label(p, h, &lv_font_montserrat_20, C_TXT);
+  make_label(p, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
+  make_label(p, got ? "click to replay this remote" : "demo - CC1101 not detected",
+             &lv_font_montserrat_14, got ? C_GREEN_SFT : C_AMBER);
+  make_label(box, "captures & replays -> SD", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   lv_obj_t *p = panel(box);
   if (!nfc_present()) {
@@ -872,6 +896,7 @@ static void build_tool(int c, int i) {
   section(scr, t.code);
   lv_obj_t *box = content_box(scr);
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
+  else if (c == 0 && i == 1) tool_subghz_capture(box);// Sub-GHz > Capture & replay
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
   else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
