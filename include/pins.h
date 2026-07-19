@@ -43,6 +43,13 @@
 #define MCP_BUZZER        5       // GPA5  — active buzzer via BC547
 #define MCP_MOTOR         6       // GPA6  — vibration motor via BC547 + flyback
 
+// PN532 is I2C (addr 0x24); its IRQ/RST pads are left OPEN on this board and every
+// real GPIO is allocated, so the driver's required irq/reset args point at the unused
+// onboard LED pin (harmless to toggle). We poll, not IRQ. ponytail: if I2C polling
+// misbehaves on hardware, the PN532 may need its IRQ/RST actually wired — see BRINGUP.
+#define PIN_PN532_IRQ     40
+#define PIN_PN532_RST     40
+
 // ---- IR ----
 #define PIN_IR_TX         47      // Adafruit 5639 emitter Signal (onboard FET)
 #define PIN_IR_RX         48      // TSOP38238 / VS1838B OUT

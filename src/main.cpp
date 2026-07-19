@@ -17,6 +17,8 @@
 #include "storage.h"
 #include "radio_cc1101.h"
 #include "subghz_classify.h"
+#include "nfc_pn532.h"
+#include "nfc_keys.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -517,6 +519,29 @@ static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
   make_label(box, "rotate = sweep    click = lock", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
+  lv_obj_t *p = panel(box);
+  if (!nfc_present()) {
+    make_label(p, "NFC READ", &lv_font_unscii_8, C_AMBER);
+    make_label(p, "demo - PN532 not detected", &lv_font_montserrat_16, C_AMBER);
+    make_label(p, "UID 04:A2:1B:9C  -  Mifare Classic 1K", &lv_font_montserrat_14, C_SUB);
+    make_label(box, "click to crack keys (dictionary)", &lv_font_unscii_8, C_MUTE);
+    return;
+  }
+  uint8_t uid[7], len = 0;
+  if (nfc_read_uid(uid, &len)) {
+    char h[24]; nfc_uid_hex(uid, len, h, sizeof h);
+    make_label(p, "CARD", &lv_font_unscii_8, C_GREEN);
+    make_label(p, h, &lv_font_montserrat_20, C_TXT);
+    make_label(p, len == 4 ? "Mifare Classic / NTAG" : "7-byte UID card",
+               &lv_font_montserrat_14, C_SUB);
+    make_label(p, "click to crack keys (dictionary)", &lv_font_montserrat_14, C_GREEN_SFT);
+  } else {
+    make_label(p, "PN532 READY", &lv_font_unscii_8, C_GREEN);
+    make_label(p, "tap a card to the antenna", &lv_font_montserrat_16, C_TXT);
+  }
+}
+
 static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
   lv_obj_t *p = panel(box);
   make_label(p, "SWEEP COMPLETE", &lv_font_unscii_8, C_CYAN);
@@ -545,6 +570,7 @@ static void build_tool(int c, int i) {
   section(scr, t.code);
   lv_obj_t *box = content_box(scr);
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
+  else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else                       tool_generic(box, t);
   load_screen(scr);
@@ -686,6 +712,10 @@ void setup() {
   } else {
     Serial.println("[ui] MCP23017 NOT found — encoder rotate only until wired");
   }
+
+  // PN532 NFC (shares the I2C bus started above)
+  nfc_begin();
+  Serial.printf("[nfc] PN532 %s\n", nfc_present() ? "present" : "absent");
 
   // LVGL encoder input device + focus group
   g_group = lv_group_create();
