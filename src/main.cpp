@@ -39,6 +39,7 @@
 #include "karma.h"
 #include "evilportal.h"
 #include "handshake.h"
+#include "wardrive.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -854,6 +855,18 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_wardrive(lv_obj_t *box) {       // WiFi > Wardrive
+  lv_obj_t *p = panel(box);
+  char row[128];
+  wardrive_csv("A4:2B:B0:11:22:33", "linksys", "[WPA2-PSK-CCMP][ESS]",
+               6, -52, 12.971600, 77.594600, row, sizeof row);
+  make_label(p, "WARDRIVE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "log every AP + GPS -> SD (WiGLE)", &lv_font_montserrat_16, C_TXT);
+  make_label(p, "1 net  -  fix 12.9716,77.5946", &lv_font_unscii_8, C_SUB);
+  make_label(p, "wardrive.csv ready to upload", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "needs GPS fix + SD - scan is bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_handshake(lv_obj_t *box) {      // WiFi > Handshake / PMKID
   lv_obj_t *p = panel(box);
   // Demo: M1 + M2 captured (enough to crack offline).
@@ -1050,6 +1063,7 @@ static void build_tool(int c, int i) {
   else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
   else if (c == 3 && i == 2) tool_evilportal(box);    // WiFi > Evil Portal
   else if (c == 3 && i == 3) tool_handshake(box);     // WiFi > Handshake / PMKID
+  else if (c == 3 && i == 4) tool_wardrive(box);      // WiFi > Wardrive
   else if (c == 3 && i == 5) tool_karma(box);         // WiFi > Karma / MANA
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
