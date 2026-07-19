@@ -35,6 +35,7 @@
 #include "usage_fmt.h"
 #include "df_logic.h"
 #include "ui_edit.h"
+#include "espnow_mesh.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -639,6 +640,17 @@ static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanne
   make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_espnow(lv_obj_t *box) {         // Comms / Off-grid > ESP-NOW mesh
+  if (!espnow_active()) espnow_begin();
+  lv_obj_t *p = panel(box);
+  make_label(p, "ESP-NOW MESH", &lv_font_unscii_8, C_GREEN);
+  char h[40]; snprintf(h, sizeof h, "%lu messages received", (unsigned long)espnow_rx());
+  make_label(p, h, &lv_font_montserrat_16, C_TXT);
+  const char *last = espnow_last();
+  make_label(p, last[0] ? last : "(no messages yet)", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "router-free - click to broadcast ping", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
   lv_obj_t *p = panel(box);
   int pct = usage_pct(62, 100);                  // demo — real data via phone bridge
@@ -845,6 +857,7 @@ static void build_tool(int c, int i) {
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
+  else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
