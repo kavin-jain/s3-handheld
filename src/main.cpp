@@ -30,6 +30,7 @@
 #include "nrf_band.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
+#include "wof.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -689,6 +690,25 @@ static void tool_ndef(lv_obj_t *box) {           // RFID/NFC > Write NDEF tag
              &lv_font_montserrat_14, C_SUB);
 }
 
+static void tool_wof(lv_obj_t *box) {            // Bluetooth > Wall of Flipper
+  lv_obj_t *p = panel(box);
+  int n = ble_count();
+  if (n <= 0) n = ble_scan(3);
+  int gear = 0;
+  make_label(p, "WALL OF FLIPPER", &lv_font_unscii_8, C_CYAN);
+  for (int i = 0; i < n; i++) {
+    const char *g = wof_identify(ble_name(i));
+    if (!g) continue;
+    gear++;
+    char line[64]; snprintf(line, sizeof line, "%s  %d dBm", g, ble_rssi(i));
+    make_label(p, line, &lv_font_montserrat_14, C_AMBER);
+  }
+  if (gear == 0)
+    make_label(p, n > 0 ? "no hacking gear nearby" : "scanning...",
+               &lv_font_montserrat_16, C_GREEN_SFT);
+  make_label(box, "spots Flippers / pwnagotchis / Marauders", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
   lv_obj_t *p = panel(box);
   int n = ble_count();
@@ -739,6 +759,7 @@ static void build_tool(int c, int i) {
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
+  else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
