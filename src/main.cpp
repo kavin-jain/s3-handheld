@@ -27,6 +27,7 @@
 #include "transit.h"
 #include "ibutton.h"
 #include "ir_remote.h"
+#include "irdb.h"
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
 #include "ble_scan.h"
@@ -846,6 +847,19 @@ static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   make_label(box, "click = blast all (turns TVs off)", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
+  lv_obj_t *p = panel(box);
+  const IrBrand *b = ir_brand_at(0);             // demo: first brand (Samsung)
+  make_label(p, "UNIVERSAL REMOTE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, b->name, &lv_font_montserrat_20, C_TXT);
+  char h[40]; snprintf(h, sizeof h, "POWER  0x%08lX", (unsigned long)b->power);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  char n[40]; snprintf(n, sizeof n, "%d brands in DB", ir_brand_count());
+  make_label(p, n, &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "rotate = brand   click = blast (bring-up)",
+             &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   lv_obj_t *p = panel(box);
   make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
@@ -1211,6 +1225,7 @@ static void build_tool(int c, int i) {
   else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
   else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
   else if (c == 1 && i == 6) tool_ibutton(box);       // RFID/NFC > iButton key
+  else if (c == 2 && i == 0) tool_ir_universal(box);  // IR > Universal remote
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
