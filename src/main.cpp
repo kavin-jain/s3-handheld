@@ -49,6 +49,7 @@
 #include "hackscreen.h"
 #include "hid_keymap.h"
 #include "ical.h"
+#include "tasks.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -797,6 +798,22 @@ static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
   make_label(box, "demo - real data via phone bridge", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_tasks(lv_obj_t *box) {          // Me > Tasks
+  lv_obj_t *p = panel(box);
+  make_label(p, "TASKS", &lv_font_unscii_8, C_GREEN);
+  static const char *lines[] = {
+    "[ ] !1 Solder the BL mod", "[x] Flash firmware m2", "[ ] !3 Order antennas"};
+  for (const char *ln : lines) {
+    bool done; int prio; const char *text;
+    if (!task_parse(ln, &done, &prio, &text)) continue;
+    char row[48];
+    snprintf(row, sizeof row, "%s %s%s", done ? "[x]" : "[ ]",
+             prio ? (prio == 1 ? "! " : "  ") : "  ", text);
+    make_label(p, row, &lv_font_unscii_8, done ? C_MUTE : C_TXT);
+  }
+  make_label(box, "synced from your phone = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_calendar(lv_obj_t *box) {       // Me > Calendar
   lv_obj_t *p = panel(box);
   char when[32];
@@ -1218,6 +1235,7 @@ static void build_tool(int c, int i) {
   else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 12 && i == 1) tool_calendar(box);     // Me > Calendar
+  else if (c == 12 && i == 2) tool_tasks(box);        // Me > Tasks
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
