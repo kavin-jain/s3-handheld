@@ -43,6 +43,7 @@
 #include "wardrive.h"
 #include "buspirate.h"
 #include "fwdump.h"
+#include "gpio_util.h"
 #include "droneid.h"
 #include "skimmer.h"
 #include "audiobug.h"
@@ -1010,6 +1011,19 @@ static void tool_fwdump(lv_obj_t *box) {         // Tools > Firmware dump
   make_label(box, "clip onto SPI flash - read = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_gpio(lv_obj_t *box) {           // Tools > GPIO play
+  lv_obj_t *p = panel(box);
+  int pin = 5;                                   // demo pin (usable)
+  make_label(p, "GPIO PLAY", &lv_font_unscii_8, C_GREEN);
+  char h[40]; snprintf(h, sizeof h, "GPIO %d  -  %s", pin,
+                       gpio_usable(pin) ? "safe to drive" : "RESERVED");
+  make_label(p, h, &lv_font_montserrat_20, gpio_usable(pin) ? C_TXT : C_RED);
+  make_label(p, "toggle HIGH/LOW, read state", &lv_font_montserrat_14, C_SUB);
+  make_label(p, "flash/PSRAM pins 26-37 locked out", &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "rotate = pin   click = toggle (bring-up)",
+             &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_buspirate(lv_obj_t *box) {      // Tools > Bus Pirate
   lv_obj_t *p = panel(box);
   make_label(p, "I2C SCAN", &lv_font_unscii_8, C_GREEN);
@@ -1247,6 +1261,7 @@ static void build_tool(int c, int i) {
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
   else if (c == 10 && i == 0) tool_buspirate(box);    // Tools / Bench > Bus Pirate
   else if (c == 10 && i == 1) tool_fwdump(box);       // Tools / Bench > Firmware dump
+  else if (c == 10 && i == 2) tool_gpio(box);         // Tools / Bench > GPIO play
   else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 12 && i == 1) tool_calendar(box);     // Me > Calendar
