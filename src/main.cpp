@@ -23,6 +23,7 @@
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
 #include "ble_scan.h"
+#include "badusb.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -567,6 +568,17 @@ static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
   make_label(box, "click = rescan    red = open network", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
+  // Info only — never auto-runs a payload on screen build (that would type into
+  // whatever's plugged in). Running is a deliberate ACTION-key step (next iter).
+  lv_obj_t *p = panel(box);
+  make_label(p, "BADUSB / HID", &lv_font_unscii_8, C_RED);
+  make_label(p, "acts as a USB keyboard", &lv_font_montserrat_16, C_TXT);
+  make_label(p, "payload: STRING / GUI r / DELAY / ENTER", &lv_font_montserrat_14, C_SUB);
+  make_label(p, "load a .txt from SD, then run", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "only on machines you own", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   lv_obj_t *p = panel(box);
   make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
@@ -646,6 +658,7 @@ static void build_tool(int c, int i) {
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
+  else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else                       tool_generic(box, t);
   load_screen(scr);
