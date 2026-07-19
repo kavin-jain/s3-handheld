@@ -35,6 +35,7 @@
 #include "deauth_detect.h"
 #include "nrf24_radio.h"
 #include "nrf_band.h"
+#include "mousejack.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -725,6 +726,19 @@ static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanne
   make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_mousejack(lv_obj_t *box) {      // NRF24 / 2.4GHz > Mousejack
+  lv_obj_t *p = panel(box);
+  uint8_t f[UNIFYING_KBD_LEN];
+  mousejack_key(0x00, 0x00, 0x04, f);            // demo: an 'a' keystroke frame
+  make_label(p, "MOUSEJACK", &lv_font_unscii_8, C_AMBER);
+  make_label(p, "inject into wireless kbd/mouse", &lv_font_montserrat_16, C_TXT);
+  char hx[40]; snprintf(hx, sizeof hx, "Unifying frame  cksum %02X  (sum 0)", f[9]);
+  make_label(p, hx, &lv_font_unscii_8, C_SUB);
+  make_label(p, "unencrypted Logitech dongles", &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "nRF24 ESB inject = bring-up - own gear only",
+             &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_espnow(lv_obj_t *box) {         // Comms / Off-grid > ESP-NOW mesh
   if (!espnow_active()) espnow_begin();
   lv_obj_t *p = panel(box);
@@ -986,6 +1000,7 @@ static void build_tool(int c, int i) {
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
+  else if (c == 5 && i == 0) tool_mousejack(box);     // NRF24 / 2.4GHz > Mousejack
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
