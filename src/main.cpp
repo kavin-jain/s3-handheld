@@ -37,6 +37,7 @@
 #include "nrf_band.h"
 #include "mousejack.h"
 #include "karma.h"
+#include "evilportal.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -852,6 +853,22 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_evilportal(lv_obj_t *box) {     // WiFi > Evil Portal
+  lv_obj_t *p = panel(box);
+  // Demo: a credential POST the fake login page would capture.
+  const char *post = "user=alice&pass=hunter%402";
+  char u[32], pw[32];
+  form_get(post, "user", u, sizeof u);
+  form_get(post, "pass", pw, sizeof pw);
+  make_label(p, "EVIL PORTAL", &lv_font_unscii_8, C_AMBER);
+  make_label(p, "fake captive login, capture creds", &lv_font_montserrat_16, C_TXT);
+  char h[48]; snprintf(h, sizeof h, "caught: %s / %s", u, pw);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "awareness testing - your network only",
+             &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "DNS hijack + HTTP server = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_karma(lv_obj_t *box) {          // WiFi > Karma / MANA
   lv_obj_t *p = panel(box);
   // Demo probe request: client hunting for "CoffeeShop".
@@ -1014,6 +1031,7 @@ static void build_tool(int c, int i) {
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
+  else if (c == 3 && i == 2) tool_evilportal(box);    // WiFi > Evil Portal
   else if (c == 3 && i == 5) tool_karma(box);         // WiFi > Karma / MANA
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
