@@ -32,6 +32,7 @@
 #include "ir_remote.h"
 #include "irdb.h"
 #include "ac_db.h"
+#include "ac_state.h"
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
 #include "ble_scan.h"
@@ -257,6 +258,7 @@ static lv_obj_t *g_edit_label = nullptr;
 static void (*g_action_cb)() = nullptr;
 // IR universal-remote live brand selector (encoder cycles g_ir_brand).
 static int       g_ir_brand = 0;
+static int       g_ac_temp = 24;               // A/C setpoint (ACTION bumps it)
 static lv_obj_t *g_ir_name_lbl = nullptr;
 static lv_obj_t *g_ir_code_lbl = nullptr;
 // Sub-GHz frequency finder live band selector (encoder cycles g_freq_idx).
@@ -1026,8 +1028,16 @@ static void ir_brand_edit_cb(int idx) {
     const AcBrand *a = ac_brand_at(idx - tvN);
     if (!a) return;
     if (g_ir_name_lbl) lv_label_set_text_fmt(g_ir_name_lbl, "A/C  %s", a->name);
-    if (g_ir_code_lbl) lv_label_set_text_fmt(g_ir_code_lbl, "IRac protocol #%d", a->proto);
+    if (g_ir_code_lbl)
+      lv_label_set_text_fmt(g_ir_code_lbl, "%s %d\xC2\xB0""C   IRac #%d",
+                            ac_mode_name(AC_COOL), ac_clamp_temp(g_ac_temp), a->proto);
   }
+}
+
+// ACTION on the universal remote bumps the A/C setpoint (16..30, wrap) and repaints.
+static void ir_ac_temp_bump() {
+  g_ac_temp = g_ac_temp >= 30 ? 16 : g_ac_temp + 1;
+  ir_brand_edit_cb(g_ir_brand);
 }
 
 static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
@@ -1039,13 +1049,14 @@ static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
   g_ir_code_lbl = make_label(p, "", &lv_font_unscii_8, C_SUB);
   char n[40]; snprintf(n, sizeof n, "%d TV + %d A/C brands", ir_brand_count(), AC_BRAND_COUNT);
   make_label(p, n, &lv_font_montserrat_14, C_GREEN_SFT);
-  make_label(box, "rotate = brand   click = blast (bring-up)",
+  make_label(box, "rotate = brand   ACTION = A/C temp   click = blast",
              &lv_font_unscii_8, C_MUTE);
   ir_brand_edit_cb(g_ir_brand);                  // paint the current selection
-  // Live-select across the whole TV+AC catalogue.
+  // Live-select across the whole TV+AC catalogue; ACTION adjusts A/C temp.
   g_edit_val = &g_ir_brand;
   g_edit_min = 0; g_edit_max = total - 1; g_edit_step = 1;
   g_edit_cb = ir_brand_edit_cb;
+  g_action_cb = ir_ac_temp_bump;
 }
 
 // Last learned IR frame + save status; ACTION writes it to /ir.
