@@ -21,6 +21,7 @@
 #include "nfc_keys.h"
 #include "ndef.h"
 #include "transit.h"
+#include "ibutton.h"
 #include "ir_remote.h"
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
@@ -752,6 +753,18 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_ibutton(lv_obj_t *box) {        // RFID/NFC > iButton key
+  lv_obj_t *p = panel(box);
+  make_label(p, "IBUTTON / 1-WIRE", &lv_font_unscii_8, C_GREEN);
+  uint8_t rom[8] = {0x01, 0x2A, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F, 0x00};
+  rom[7] = onewire_crc8(rom, 7);
+  char h[48]; snprintf(h, sizeof h, "family 0x%02X  crc %s", rom[0],
+                       ibutton_valid(rom) ? "ok" : "bad");
+  make_label(p, h, &lv_font_montserrat_16, C_TXT);
+  make_label(p, "touch a Dallas key to the probe", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "1-Wire read = bring-up (GPIO bit-bang)", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_transit(lv_obj_t *box) {        // RFID/NFC > Transit card
   lv_obj_t *p = panel(box);
   make_label(p, "TRANSIT CARD", &lv_font_unscii_8, C_GREEN);
@@ -848,6 +861,7 @@ static void build_tool(int c, int i) {
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
   else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
+  else if (c == 1 && i == 6) tool_ibutton(box);       // RFID/NFC > iButton key
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
