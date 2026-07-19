@@ -36,6 +36,7 @@
 #include "nrf24_radio.h"
 #include "nrf_band.h"
 #include "mousejack.h"
+#include "karma.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -851,6 +852,22 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_karma(lv_obj_t *box) {          // WiFi > Karma / MANA
+  lv_obj_t *p = panel(box);
+  // Demo probe request: client hunting for "CoffeeShop".
+  const uint8_t probe[] = {0x00,0x0A,'C','o','f','f','e','e','S','h','o','p',
+                           0x01,0x04,0x82,0x84,0x8b,0x96};
+  char ssid[33];
+  bool got = ie_get_ssid(probe, sizeof probe, ssid, sizeof ssid);
+  make_label(p, "KARMA / MANA", &lv_font_unscii_8, C_AMBER);
+  make_label(p, "answer any SSID a phone probes for", &lv_font_montserrat_16, C_TXT);
+  char h[48]; snprintf(h, sizeof h, "heard probe: \"%s\"", got ? ssid : "(hidden)");
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "lures auto-connect - your own devices only",
+             &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "SoftAP auto-respond = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_deauth_atk(lv_obj_t *box) {     // WiFi > Deauth (authorized)
   lv_obj_t *p = panel(box);
   const uint8_t bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
@@ -997,6 +1014,7 @@ static void build_tool(int c, int i) {
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
+  else if (c == 3 && i == 5) tool_karma(box);         // WiFi > Karma / MANA
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
