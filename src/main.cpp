@@ -21,6 +21,7 @@
 #include "wmbus.h"
 #include "amiibo.h"
 #include "emv.h"
+#include "mifare.h"
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
 #include "ndef.h"
@@ -623,6 +624,18 @@ static void tool_wmbus(lv_obj_t *box) {          // Sub-GHz > wM-Bus meter
   make_label(p, sn, &lv_font_montserrat_14, C_SUB);
   make_label(p, "demo - CC1101 wM-Bus RX = bring-up", &lv_font_montserrat_14, C_AMBER);
   make_label(box, "reads utility meters (T/C mode, 868 MHz)", &lv_font_unscii_8, C_MUTE);
+}
+
+static void tool_mifare(lv_obj_t *box) {         // RFID/NFC > Mifare crack
+  lv_obj_t *p = panel(box);
+  const uint8_t found[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};   // demo: sector 0 opened
+  make_label(p, "MIFARE CRACK", &lv_font_unscii_8, C_AMBER);
+  char h[40]; snprintf(h, sizeof h, "%d keys in dictionary", MIFARE_KEY_COUNT);
+  make_label(p, h, &lv_font_montserrat_16, C_TXT);
+  char k[48]; snprintf(k, sizeof k, "sec 0 KeyA: %s", mifare_key_name(found));
+  make_label(p, k, &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(p, "tries default keys per sector", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "PN532 authenticate loop = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
 static void tool_amiibo(lv_obj_t *box) {         // RFID/NFC > Amiibo clone
@@ -1250,6 +1263,7 @@ static void build_tool(int c, int i) {
   else if (c == 0 && i == 1) tool_subghz_capture(box);// Sub-GHz > Capture & replay
   else if (c == 0 && i == 5) tool_wmbus(box);         // Sub-GHz > wM-Bus meter
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
+  else if (c == 1 && i == 1) tool_mifare(box);        // RFID/NFC > Mifare crack
   else if (c == 1 && i == 2) tool_emv(box);           // RFID/NFC > Bank card read
   else if (c == 1 && i == 5) tool_amiibo(box);        // RFID/NFC > Amiibo clone
   else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
