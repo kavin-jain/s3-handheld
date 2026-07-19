@@ -1024,13 +1024,31 @@ static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
   g_edit_cb = ir_brand_edit_cb;
 }
 
+// Last learned IR frame + save status; ACTION writes it to /ir.
+static uint8_t  g_irl_proto = 3;                 // NEC
+static uint32_t g_irl_value = 0x00000408;        // demo addr/cmd
+static uint16_t g_irl_bits = 32;
+static lv_obj_t *g_irl_status = nullptr;
+
+static void ir_save_action() {
+  char body[80];
+  int n = snprintf(body, sizeof body, "protocol:%u\nbits:%u\nvalue:0x%08lX\n",
+                   (unsigned)g_irl_proto, (unsigned)g_irl_bits,
+                   (unsigned long)g_irl_value);
+  const char *path = storage_save(SAVE_IR, "ir", (const uint8_t *)body, (size_t)n);
+  if (g_irl_status)
+    lv_label_set_text(g_irl_status, (path && path[0]) ? path : "no SD card");
+}
+
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   lv_obj_t *p = panel(box);
   make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
   make_label(p, "TX GPIO47   RX GPIO48", &lv_font_unscii_8, C_SUB);
   make_label(p, "aim any remote and press a button", &lv_font_montserrat_16, C_TXT);
   make_label(p, "last: NEC  addr 0x04  cmd 0x08  (demo)", &lv_font_montserrat_14, C_GREEN_SFT);
-  make_label(box, "click = blast it back", &lv_font_unscii_8, C_MUTE);
+  g_irl_status = make_label(p, "ACTION = save to /ir", &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(box, "ACTION saves .ir    click = blast", &lv_font_unscii_8, C_MUTE);
+  g_action_cb = ir_save_action;
 }
 
 static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
