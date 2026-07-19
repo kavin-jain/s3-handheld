@@ -20,6 +20,7 @@
 #include "subghz_replay.h"
 #include "wmbus.h"
 #include "amiibo.h"
+#include "emv.h"
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
 #include "ndef.h"
@@ -620,6 +621,31 @@ static void tool_amiibo(lv_obj_t *box) {         // RFID/NFC > Amiibo clone
   make_label(box, "clone amiibo -> blank NTAG215", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_emv(lv_obj_t *box) {            // RFID/NFC > Bank card read
+  lv_obj_t *p = panel(box);
+  // Demo Track-2-Equivalent (test PAN 4111..., not a real card).
+  const uint8_t t2[12] = {0x41,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
+                          0xD2,0x51,0x22,0x01};
+  char pan[24], yymm[5];
+  bool ok = emv_parse_track2(t2, sizeof t2, pan, sizeof pan, yymm);
+  char masked[24] = "----";
+  size_t plen = 0; while (pan[plen]) plen++;
+  if (ok && plen >= 10) {                        // PCI-safe: first 6 + last 4
+    size_t k = 0;
+    for (size_t i = 0; i < plen; i++)
+      masked[k++] = (i < 6 || i >= plen - 4) ? pan[i] : '*';
+    masked[k] = 0;
+  }
+  make_label(p, "EMV CONTACTLESS", &lv_font_unscii_8, C_AMBER);
+  make_label(p, masked, &lv_font_montserrat_20, C_TXT);
+  char sub[48]; snprintf(sub, sizeof sub, "%s  -  exp %c%c/%c%c",
+                         card_network(pan), yymm[2], yymm[3], yymm[0], yymm[1]);
+  make_label(p, sub, &lv_font_montserrat_14, C_SUB);
+  make_label(p, luhn_valid(pan) ? "Luhn OK  -  demo card" : "invalid",
+             &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "public data only - PN532 APDU = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   lv_obj_t *p = panel(box);
   if (!nfc_present()) {
@@ -932,6 +958,7 @@ static void build_tool(int c, int i) {
   else if (c == 0 && i == 1) tool_subghz_capture(box);// Sub-GHz > Capture & replay
   else if (c == 0 && i == 5) tool_wmbus(box);         // Sub-GHz > wM-Bus meter
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
+  else if (c == 1 && i == 2) tool_emv(box);           // RFID/NFC > Bank card read
   else if (c == 1 && i == 5) tool_amiibo(box);        // RFID/NFC > Amiibo clone
   else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
   else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
