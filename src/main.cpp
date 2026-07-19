@@ -32,6 +32,7 @@
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
 #include "ble_scan.h"
+#include "ble_track.h"
 #include "gatt_uuid.h"
 #include "badusb.h"
 #include "deauth_detect.h"
@@ -1217,6 +1218,19 @@ static void tool_wof(lv_obj_t *box) {            // Bluetooth > Wall of Flipper
   make_label(box, "spots Flippers / pwnagotchis / Marauders", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_tracker_hunt(lv_obj_t *box) {   // Bluetooth > Tracker hunt
+  lv_obj_t *p = panel(box);
+  const uint8_t demo[] = {0x4C, 0x00, 0x12, 0x19};   // Apple AirTag adv data
+  const char *brand = ble_tracker_brand(ble_company_id(demo, sizeof demo));
+  make_label(p, "TRACKER HUNT", &lv_font_unscii_8, C_CYAN);
+  make_label(p, "find AirTag / Tile / SmartTag", &lv_font_montserrat_16, C_TXT);
+  char h[40]; snprintf(h, sizeof h, "nearest: %s", brand ? brand : "none");
+  make_label(p, h, &lv_font_montserrat_20, C_GREEN_SFT);
+  make_label(p, "walk around - RSSI rises as you near it",
+             &lv_font_montserrat_14, C_SUB);
+  make_label(box, "BLE mfg-data scan = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
   lv_obj_t *p = panel(box);
   int n = ble_count();
@@ -1283,6 +1297,7 @@ static void build_tool(int c, int i) {
   else if (c == 3 && i == 5) tool_karma(box);         // WiFi > Karma / MANA
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
+  else if (c == 4 && i == 2) tool_tracker_hunt(box);  // Bluetooth > Tracker hunt
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
   else if (c == 5 && i == 0) tool_mousejack(box);     // NRF24 / 2.4GHz > Mousejack
   else if (c == 5 && i == 1) tool_keysniff(box);      // NRF24 / 2.4GHz > Keyboard sniff

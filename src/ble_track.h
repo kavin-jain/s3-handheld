@@ -18,3 +18,19 @@ static inline const char *ble_tracker_by_uuid(uint16_t uuid) {
     default:     return nullptr;
   }
 }
+
+// Bluetooth SIG company id = first 2 bytes of manufacturer data (little-endian).
+static inline uint16_t ble_company_id(const uint8_t *mfg, size_t len) {
+  return (mfg && len >= 2) ? (uint16_t)(mfg[0] | (mfg[1] << 8)) : 0;
+}
+
+// Name a tracker brand from its company id (catches beacons that carry the
+// company id but not the specific offline-finding type byte).
+static inline const char *ble_tracker_brand(uint16_t company_id) {
+  switch (company_id) {
+    case 0x004C: return "Apple AirTag";
+    case 0x0075: return "Samsung SmartTag";
+    case 0x0157: return "Tile";
+    default:     return nullptr;
+  }
+}

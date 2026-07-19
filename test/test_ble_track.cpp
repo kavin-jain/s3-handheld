@@ -17,5 +17,14 @@ int main() {
   assert(strcmp(ble_tracker_by_uuid(0xFEED), "Tile") == 0);
   assert(strcmp(ble_tracker_by_uuid(0xFD5A), "Samsung SmartTag") == 0);
   assert(ble_tracker_by_uuid(0x1234) == nullptr);
+
+  // Company-id extraction (LE) + brand lookup.
+  assert(ble_company_id(airtag, 4) == 0x004C);
+  assert(ble_company_id(other, 3) == 0x0075);
+  assert(ble_company_id(airtag, 1) == 0);        // too short
+  assert(strcmp(ble_tracker_brand(0x004C), "Apple AirTag") == 0);
+  assert(strcmp(ble_tracker_brand(0x0075), "Samsung SmartTag") == 0);
+  assert(strcmp(ble_tracker_brand(0x0157), "Tile") == 0);
+  assert(ble_tracker_brand(0x0059) == nullptr);
   return 0;
 }
