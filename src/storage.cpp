@@ -1,4 +1,5 @@
 #include "storage.h"
+#include "strutil.h"
 #include "pins.h"
 #include <Arduino.h>
 #include <SPI.h>
@@ -72,6 +73,19 @@ bool storage_save_config(const char *text) {
   f.print(text);
   f.close();
   return true;
+}
+
+int storage_count_files(const char *dir, const char *ext) {
+  if (!s_ready || !dir || !ext) return 0;
+  File d = SD.open(dir);
+  if (!d) return 0;
+  int n = 0;
+  for (File e = d.openNextFile(); e; e = d.openNextFile()) {
+    if (str_ends_with(e.name(), ext)) n++;
+    e.close();
+  }
+  d.close();
+  return n;
 }
 
 size_t storage_read_file(const char *path, char *out, size_t cap) {

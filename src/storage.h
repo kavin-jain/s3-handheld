@@ -23,3 +23,6 @@ bool storage_load_config(char *out, size_t cap);   // false if absent/empty
 // Read up to cap-1 bytes of any file into out (NUL-terminated). Returns bytes
 // read (0 if missing). Used to load a Flipper .ir file for flipper_ir.h. Bring-up.
 size_t storage_read_file(const char *path, char *out, size_t cap);
+
+// Count files in `dir` whose name ends with `ext` (e.g. "/ir", ".ir"). Bring-up.
+int storage_count_files(const char *dir, const char *ext);

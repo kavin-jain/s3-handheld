@@ -1049,6 +1049,10 @@ static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
   g_ir_code_lbl = make_label(p, "", &lv_font_unscii_8, C_SUB);
   char n[40]; snprintf(n, sizeof n, "%d TV + %d A/C brands", ir_brand_count(), AC_BRAND_COUNT);
   make_label(p, n, &lv_font_montserrat_14, C_GREEN_SFT);
+  if (storage_ready()) {                          // plus any Flipper IRDB on SD
+    char s[40]; snprintf(s, sizeof s, "+ SD IRDB: %d .ir files", storage_count_files("/ir", ".ir"));
+    make_label(p, s, &lv_font_unscii_8, C_SUB);
+  }
   make_label(box, "rotate = brand   ACTION = A/C temp   click = blast",
              &lv_font_unscii_8, C_MUTE);
   ir_brand_edit_cb(g_ir_brand);                  // paint the current selection
