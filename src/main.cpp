@@ -42,6 +42,7 @@
 #include "wardrive.h"
 #include "buspirate.h"
 #include "fwdump.h"
+#include "droneid.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -857,6 +858,24 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_droneid(lv_obj_t *box) {        // Am I safe? > Drone spotter
+  lv_obj_t *p = panel(box);
+  // Demo Remote-ID: Basic ID + a Location fix.
+  uint8_t basic[22] = {0x02, 0x10};
+  const char *uas = "1596F3A2C0D9K7X4";
+  for (int i = 0; uas[i]; i++) basic[2 + i] = (uint8_t)uas[i];
+  char id[21]; odid_basic_id(basic, id);
+  int32_t lat = 129716000, lon = 775946000;      // 12.9716, 77.5946
+  make_label(p, "DRONE SPOTTER", &lv_font_unscii_8, C_CYAN);
+  make_label(p, "Remote-ID broadcast nearby", &lv_font_montserrat_16, C_TXT);
+  char h[48]; snprintf(h, sizeof h, "ID %s", id);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  char loc[48]; snprintf(loc, sizeof loc, "pilot @ %.4f, %.4f",
+                         odid_coord(lat), odid_coord(lon));
+  make_label(p, loc, &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "BLE/WiFi Remote-ID sniff = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_fwdump(lv_obj_t *box) {         // Tools > Firmware dump
   lv_obj_t *p = panel(box);
   const uint8_t jedec[3] = {0xEF, 0x40, 0x18};   // demo: W25Q128 (Winbond 16 MiB)
@@ -1109,6 +1128,7 @@ static void build_tool(int c, int i) {
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
+  else if (c == 7 && i == 5) tool_droneid(box);       // Am I safe? > Drone spotter
   else                       tool_generic(box, t);
   load_screen(scr);
 }
