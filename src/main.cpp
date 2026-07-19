@@ -19,6 +19,7 @@
 #include "subghz_classify.h"
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
+#include "ir_remote.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -542,6 +543,15 @@ static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   }
 }
 
+static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
+  lv_obj_t *p = panel(box);
+  make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "TX GPIO47   RX GPIO48", &lv_font_unscii_8, C_SUB);
+  make_label(p, "aim any remote and press a button", &lv_font_montserrat_16, C_TXT);
+  make_label(p, "last: NEC  addr 0x04  cmd 0x08  (demo)", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "click = blast it back", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
   lv_obj_t *p = panel(box);
   make_label(p, "SWEEP COMPLETE", &lv_font_unscii_8, C_CYAN);
@@ -571,6 +581,7 @@ static void build_tool(int c, int i) {
   lv_obj_t *box = content_box(scr);
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
+  else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else                       tool_generic(box, t);
   load_screen(scr);
@@ -716,6 +727,8 @@ void setup() {
   // PN532 NFC (shares the I2C bus started above)
   nfc_begin();
   Serial.printf("[nfc] PN532 %s\n", nfc_present() ? "present" : "absent");
+
+  ir_begin();   // IR TX/RX (plain GPIO, always ready)
 
   // LVGL encoder input device + focus group
   g_group = lv_group_create();
