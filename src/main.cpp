@@ -251,6 +251,10 @@ static int *g_edit_val = nullptr;
 static int  g_edit_min, g_edit_max, g_edit_step;
 static void (*g_edit_cb)(int) = nullptr;
 static lv_obj_t *g_edit_label = nullptr;
+// IR universal-remote live brand selector (encoder cycles g_ir_brand).
+static int       g_ir_brand = 0;
+static lv_obj_t *g_ir_name_lbl = nullptr;
+static lv_obj_t *g_ir_code_lbl = nullptr;
 
 static void apply_brightness(int pct) {
   bl_user_duty = (uint8_t)(pct * 255 / 100);
@@ -264,8 +268,12 @@ static void save_config_now() {
   char line[64];
   if (cfg_serialize(&cfg, line, sizeof line)) storage_save_config(line);
 }
-// Brightness edit callback: apply live, mark dirty (saved once on screen exit).
-static void bright_edit_cb(int pct) { apply_brightness(pct); g_cfg_dirty = true; }
+// Brightness edit callback: apply live, update its label, mark dirty.
+static void bright_edit_cb(int pct) {
+  apply_brightness(pct);
+  if (g_edit_label) lv_label_set_text_fmt(g_edit_label, "%d%%", pct);
+  g_cfg_dirty = true;
+}
 
 static void pm_wake() {                        // -> ACTIVE (called on any input)
   last_input_ms = millis();
@@ -321,8 +329,7 @@ static void enc_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     int nv = edit_apply(*g_edit_val, steps, g_edit_min, g_edit_max, g_edit_step);
     if (nv != *g_edit_val) {
       *g_edit_val = nv;
-      if (g_edit_cb) g_edit_cb(nv);
-      if (g_edit_label) lv_label_set_text_fmt(g_edit_label, "%d%%", nv);
+      if (g_edit_cb) g_edit_cb(nv);              // callback owns the display update
     }
     data->enc_diff = 0;                          // don't move list focus while editing
   } else {
@@ -940,17 +947,31 @@ static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   make_label(box, "click = blast all (turns TVs off)", &lv_font_unscii_8, C_MUTE);
 }
 
+// Repaint the brand name + power code from an index (encoder edit callback).
+static void ir_brand_edit_cb(int idx) {
+  const IrBrand *b = ir_brand_at(idx);
+  if (!b) return;
+  if (g_ir_name_lbl) lv_label_set_text(g_ir_name_lbl, b->name);
+  if (g_ir_code_lbl)
+    lv_label_set_text_fmt(g_ir_code_lbl, "POWER  0x%08lX", (unsigned long)b->power);
+}
+
 static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
   lv_obj_t *p = panel(box);
-  const IrBrand *b = ir_brand_at(0);             // demo: first brand (Samsung)
+  if (g_ir_brand >= ir_brand_count()) g_ir_brand = 0;
+  const IrBrand *b = ir_brand_at(g_ir_brand);
   make_label(p, "UNIVERSAL REMOTE", &lv_font_unscii_8, C_GREEN);
-  make_label(p, b->name, &lv_font_montserrat_20, C_TXT);
+  g_ir_name_lbl = make_label(p, b->name, &lv_font_montserrat_20, C_TXT);
   char h[40]; snprintf(h, sizeof h, "POWER  0x%08lX", (unsigned long)b->power);
-  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  g_ir_code_lbl = make_label(p, h, &lv_font_unscii_8, C_SUB);
   char n[40]; snprintf(n, sizeof n, "%d brands in DB", ir_brand_count());
   make_label(p, n, &lv_font_montserrat_14, C_GREEN_SFT);
   make_label(box, "rotate = brand   click = blast (bring-up)",
              &lv_font_unscii_8, C_MUTE);
+  // Live-select: encoder now cycles the brand index and repaints in place.
+  g_edit_val = &g_ir_brand;
+  g_edit_min = 0; g_edit_max = ir_brand_count() - 1; g_edit_step = 1;
+  g_edit_cb = ir_brand_edit_cb;
 }
 
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
