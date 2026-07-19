@@ -269,6 +269,11 @@ static lv_obj_t *g_ir_code_lbl = nullptr;
 static const float FREQ_PRESETS[] = {300.0f, 315.0f, 390.0f, 433.92f, 868.0f, 915.0f};
 static const int   FREQ_N = sizeof(FREQ_PRESETS) / sizeof(FREQ_PRESETS[0]);
 static int       g_freq_idx = 3;               // default 433.92 MHz
+// Pranks USB-gag live selector (encoder cycles g_gag through the tested GAGS lib).
+static int       g_gag = 0;
+static lv_obj_t *g_gag_name = nullptr;
+static lv_obj_t *g_gag_line = nullptr;
+static lv_obj_t *g_gag_status = nullptr;
 static lv_obj_t *g_freq_mhz = nullptr, *g_freq_sub = nullptr;
 static lv_obj_t *g_freq_guess = nullptr, *g_freq_bar = nullptr;
 
@@ -1187,17 +1192,39 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+// Repaint the selected gag's name + the exact DuckyScript line (encoder edit cb).
+static void gag_paint(int idx) {
+  if (idx < 0 || idx >= GAG_COUNT) return;
+  if (g_gag_name) lv_label_set_text(g_gag_name, GAGS[idx].name);
+  if (g_gag_line) lv_label_set_text(g_gag_line, GAGS[idx].line);
+  if (g_gag_status) lv_label_set_text(g_gag_status, "ACTION = type it (USB HID bring-up)");
+}
+
+// ACTION press only: type the selected gag into the plugged-in host. The actual
+// USBHIDKeyboard playback is on-device bring-up (needs a real USB host attached).
+static void gag_run_action() {
+  if (g_gag < 0 || g_gag >= GAG_COUNT) return;
+  badusb_begin();
+  badusb_run_line(GAGS[g_gag].line);
+  if (g_gag_status)
+    lv_label_set_text(g_gag_status, badusb_ready() ? "sent" : "no USB host");
+}
+
 static void tool_usbgag(lv_obj_t *box) {         // Pranks > USB gag
-  // Info only — never types on screen build; running is a deliberate ACTION step.
+  // Never types on screen build; running is a deliberate ACTION step.
+  if (g_gag < 0 || g_gag >= GAG_COUNT) g_gag = 0;
   lv_obj_t *p = panel(box);
   make_label(p, "USB GAG", &lv_font_unscii_8, C_RED);
-  make_label(p, "harmless keyboard prank", &lv_font_montserrat_16, C_TXT);
-  char h[40]; snprintf(h, sizeof h, "%d gags: %s, %s...", GAG_COUNT,
-                       GAGS[0].name, GAGS[1].name);
-  make_label(p, h, &lv_font_unscii_8, C_SUB);
-  make_label(p, "opens a page / locks screen - all safe",
-             &lv_font_montserrat_14, C_GREEN_SFT);
-  make_label(box, "own machines only - USB HID bring-up", &lv_font_unscii_8, C_MUTE);
+  g_gag_name = make_label(p, "", &lv_font_montserrat_20, C_TXT);
+  g_gag_line = make_label(p, "", &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(p, "harmless: opens a page / locks screen", &lv_font_montserrat_14, C_SUB);
+  g_gag_status = make_label(box, "", &lv_font_unscii_8, C_MUTE);
+  gag_paint(g_gag);
+  // Live-select: encoder cycles the gag; ACTION types it (own machines only).
+  g_edit_val = &g_gag;
+  g_edit_min = 0; g_edit_max = GAG_COUNT - 1; g_edit_step = 1;
+  g_edit_cb = gag_paint;
+  g_action_cb = gag_run_action;
 }
 
 static void tool_rickroll(lv_obj_t *box) {       // Pranks > Rickroll tag

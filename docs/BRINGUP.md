@@ -74,6 +74,13 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 ## Comms / Me
 - ☐ ESP-NOW mesh exchanges a message with a second unit.
 - ☐ Phone BLE bridge feeds usage / calendar (iCal) / tasks to the device.
+- ☐ Me → Calendar/Tasks: drop /me/calendar.txt ("<iCal-dt> <title>" lines) and /me/tasks.txt
+      ("[ ] !N text") on SD; screens render them (ical_next_event / task_parse), demo if absent.
+
+## BadUSB / Pranks (USB-OTG HID)
+- ☐ USB gag: pick a gag with the encoder, plug into a host, press ACTION — badusb_run_line
+      types the DuckyScript line (Rickroll URL / GUI r / Lock screen). Own machines only.
+- ☐ DuckyScript: load a .txt payload from SD and run it; keystrokes land on the host.
 
 ## Max-power config (green-zone attacks run the radios at their hardware limit)
 - ☐ CC1101 setPA(12) = +12 dBm on the async TX (replay). Confirm range vs default.
