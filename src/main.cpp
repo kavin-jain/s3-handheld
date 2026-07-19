@@ -15,6 +15,7 @@
 #include "driver/gpio.h"
 #include "pins.h"
 #include "storage.h"
+#include "config.h"
 #include "radio_cc1101.h"
 #include "subghz_classify.h"
 #include "subghz_replay.h"
@@ -255,6 +256,16 @@ static void apply_brightness(int pct) {
   bl_user_duty = (uint8_t)(pct * 255 / 100);
   bl_write(bl_user_duty);
 }
+
+// Settings persistence: serialise current prefs to /config.txt (see config.h).
+static bool g_cfg_dirty = false;
+static void save_config_now() {
+  DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0};
+  char line[64];
+  if (cfg_serialize(&cfg, line, sizeof line)) storage_save_config(line);
+}
+// Brightness edit callback: apply live, mark dirty (saved once on screen exit).
+static void bright_edit_cb(int pct) { apply_brightness(pct); g_cfg_dirty = true; }
 
 static void pm_wake() {                        // -> ACTIVE (called on any input)
   last_input_ms = millis();
@@ -1417,7 +1428,7 @@ static void build_edit_bright() {
   load_screen(scr);
   g_edit_val = &g_bright_pct;                    // enable edit mode (render_top cleared it)
   g_edit_min = 10; g_edit_max = 100; g_edit_step = 10;
-  g_edit_cb = apply_brightness;
+  g_edit_cb = bright_edit_cb;
 }
 
 static void build_settings() {
@@ -1443,6 +1454,7 @@ static void build_settings() {
 static void render_top() {
   g_edit_val = nullptr;                           // leaving any screen exits edit mode
   g_edit_label = nullptr;
+  if (g_cfg_dirty) { save_config_now(); g_cfg_dirty = false; }   // persist on exit
   NavEntry &e = nav_stack[nav_depth - 1];
   switch (e.t) {
     case SCR_HOME:        build_home();               break;
@@ -1523,6 +1535,17 @@ void setup() {
   storage_begin();
   Serial.printf("[sd] %s (%lu/%lu MB)\n", storage_ready() ? "mounted" : "no card",
                 (unsigned long)storage_used_mb(), (unsigned long)storage_total_mb());
+
+  // Restore saved prefs (brightness is the runtime-applicable one; timers are
+  // compile-time for now). Falls back to defaults when no card / no file.
+  char cfgline[64];
+  if (storage_load_config(cfgline, sizeof cfgline)) {
+    DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0};
+    cfg_parse(cfgline, &cfg);
+    g_bright_pct = cfg.bright < 10 ? 10 : cfg.bright > 100 ? 100 : cfg.bright;
+    apply_brightness(g_bright_pct);
+    Serial.printf("[cfg] restored brightness %d%%\n", g_bright_pct);
+  }
 
   cc1101_begin();
   Serial.printf("[cc1101] %s (ver 0x%02x)\n", cc1101_present() ? "present" : "absent",

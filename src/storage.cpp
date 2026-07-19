@@ -64,3 +64,29 @@ const char *storage_save(int kind, const char *ext, const uint8_t *data, size_t 
   f.close();
   return path;
 }
+
+bool storage_save_config(const char *text) {
+  if (!s_ready || !text) return false;
+  File f = SD.open("/config.txt", FILE_WRITE);   // FILE_WRITE truncates+rewrites
+  if (!f) return false;
+  f.print(text);
+  f.close();
+  return true;
+}
+
+bool storage_load_config(char *out, size_t cap) {
+  if (!s_ready || !out || cap == 0) return false;
+  out[0] = 0;
+  if (!SD.exists("/config.txt")) return false;
+  File f = SD.open("/config.txt", FILE_READ);
+  if (!f) return false;
+  size_t o = 0;
+  while (f.available() && o < cap - 1) {
+    int c = f.read();
+    if (c < 0 || c == '\n' || c == '\r') break;
+    out[o++] = (char)c;
+  }
+  out[o] = 0;
+  f.close();
+  return o > 0;
+}

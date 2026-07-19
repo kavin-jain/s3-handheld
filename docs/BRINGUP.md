@@ -75,3 +75,4 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 - ☐ SD mounts; captures write to /subghz /nfc /ir /wifi and reload.
 - ☐ Save N captures of one kind: filenames increment (0000,0001,...) with no overwrite
       (next_seq scans the folder once via sp_parse_seq; verify e.name() is basename-or-path safe).
+- ☐ Settings persist: change brightness, reboot, value restored from /config.txt (config.h round-trip).

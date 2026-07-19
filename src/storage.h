@@ -15,3 +15,7 @@ uint32_t storage_used_mb();
 // Save a blob under the next free slot for a kind (e.g. SAVE_NFC, ext "nfc").
 // Returns the path written, or "" on failure.
 const char *storage_save(int kind, const char *ext, const uint8_t *data, size_t len);
+
+// Persist / load the settings line at /config.txt (see config.h). Bring-up.
+bool storage_save_config(const char *text);
+bool storage_load_config(char *out, size_t cap);   // false if absent/empty
