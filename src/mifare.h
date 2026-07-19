@@ -22,6 +22,20 @@ static const MifareKey MIFARE_DEFAULT_KEYS[] = {
 static const int MIFARE_KEY_COUNT =
     sizeof(MIFARE_DEFAULT_KEYS) / sizeof(MIFARE_DEFAULT_KEYS[0]);
 
+// Count valid 6-byte keys in a keys.dic text (one hex key per line, # comments
+// and blanks skipped, wrong-length rejected). Lets the user drop a big community
+// dictionary on SD instead of us hardcoding/guessing keys. Uses nfc_parse_key.
+static inline int mifare_dict_count(const char *text) {
+  if (!text) return 0;
+  int n = 0; uint8_t k[6];
+  for (const char *line = text; line && *line; ) {
+    if (nfc_parse_key(line, k)) n++;
+    const char *nl = line; while (*nl && *nl != '\n') nl++;
+    line = (*nl == '\n') ? nl + 1 : 0;
+  }
+  return n;
+}
+
 // Name of a 6-byte key if it's a known default, else "unknown".
 static inline const char *mifare_key_name(const uint8_t key[6]) {
   for (int i = 0; i < MIFARE_KEY_COUNT; i++) {

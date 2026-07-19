@@ -27,5 +27,18 @@ int main() {
     uint8_t k[6];
     assert(nfc_parse_key(MIFARE_DEFAULT_KEYS[i].hex, k));
   }
+
+  // SD dictionary counting: valid keys counted, comments/blanks/junk skipped.
+  const char *dic =
+    "FFFFFFFFFFFF\n"
+    "# a comment line\n"
+    "A0A1A2A3A4A5\n"
+    "\n"
+    "000000000000\n"
+    "notahexkey\n"
+    "B0B1B2B3B4B5\n";
+  assert(mifare_dict_count(dic) == 4);
+  assert(mifare_dict_count("") == 0);
+  assert(mifare_dict_count(nullptr) == 0);
   return 0;
 }

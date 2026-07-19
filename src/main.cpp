@@ -709,7 +709,12 @@ static void tool_mifare(lv_obj_t *box) {         // RFID/NFC > Mifare crack
   lv_obj_t *p = panel(box);
   const uint8_t found[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};   // demo: sector 0 opened
   make_label(p, "MIFARE CRACK", &lv_font_unscii_8, C_AMBER);
-  char h[40]; snprintf(h, sizeof h, "%d keys in dictionary", MIFARE_KEY_COUNT);
+  int sdkeys = 0;
+  if (storage_ready()) {                          // + user dictionary from SD
+    static char dic[2048];
+    if (storage_read_file("/nfc/keys.dic", dic, sizeof dic)) sdkeys = mifare_dict_count(dic);
+  }
+  char h[48]; snprintf(h, sizeof h, "%d built-in + %d SD keys", MIFARE_KEY_COUNT, sdkeys);
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
   char k[48]; snprintf(k, sizeof k, "sec 0 KeyA: %s", mifare_key_name(found));
   make_label(p, k, &lv_font_unscii_8, C_GREEN_SFT);
