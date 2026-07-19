@@ -21,6 +21,11 @@ Reference-only (NOT copied into this repository):
   Hiktron/Hizmos   — no declared license (all rights reserved); read for understanding only.
   pr3y/Bruce       — AGPL-3.0; read for understanding only. Original code written here instead.
 
-Bundled data (assets/, gitignored, curated onto device SD at build time):
-  Lucaslhm/Flipper-IRDB            IR remote database
+IR remote database (user-supplied on SD; NOT vendored into this tree):
+  Lucaslhm/Flipper-IRDB            CC0-1.0 (public domain, verified 2026-07).
+    The firmware ships only an original .ir parser (src/flipper_ir.h) + sender
+    (ir_send_flipper). Drop the CC0 IRDB — or your own Flipper's SD — under /ir on
+    the card and the universal remote reads it. No database is bundled in the repo.
+
+Other bundled data (assets/, gitignored, curated onto device SD at build time):
   mf_classic_dict (aggregated)     Mifare Classic key dictionary

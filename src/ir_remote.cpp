@@ -53,3 +53,30 @@ bool ir_send(uint8_t proto, uint64_t value, uint16_t bits) {
   if (!s_ready) return false;
   return irsend.send((decode_type_t)proto, value, bits);
 }
+
+// Send a Flipper .ir "parsed" record. Flipper stores address+command as little-
+// endian bytes; each protocol has its own encoder in IRremoteESP8266. Bring-up.
+bool ir_send_flipper(const FlipperIr *fp) {
+  if (!s_ready || !fp || fp->type != IRREC_PARSED) return false;
+  uint16_t a16 = (uint16_t)(fp->addr[0] | (fp->addr[1] << 8));
+  uint16_t c16 = (uint16_t)(fp->cmd[0]  | (fp->cmd[1]  << 8));
+  const char *p = fp->protocol;
+  if (!strcmp(p, "NEC") || !strcmp(p, "NECext") || !strcmp(p, "NEC42")) {
+    irsend.sendNEC(irsend.encodeNEC(a16, c16));
+    return true;
+  }
+  if (!strcmp(p, "Samsung32")) {
+    irsend.sendSAMSUNG(irsend.encodeSAMSUNG(fp->addr[0], fp->cmd[0]), 32);
+    return true;
+  }
+  if (!strcmp(p, "SIRC") || !strcmp(p, "SIRC15") || !strcmp(p, "SIRC20")) {
+    uint16_t bits = !strcmp(p, "SIRC15") ? 15 : !strcmp(p, "SIRC20") ? 20 : 12;
+    irsend.sendSony(irsend.encodeSony(bits, fp->cmd[0], a16), bits);
+    return true;
+  }
+  if (!strcmp(p, "RC6")) {
+    irsend.sendRC6(irsend.encodeRC6(a16, fp->cmd[0]));
+    return true;
+  }
+  return false;    // raw / RC5 / Kaseikyo etc. — not yet mapped
+}

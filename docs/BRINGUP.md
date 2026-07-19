@@ -32,6 +32,9 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 ## IR (TX GPIO47 / RX GPIO48)
 - ☐ Learns a real remote; blasts it back and the TV responds.
 - ☐ Universal-remote brand DB powers off a known TV/AC.
+- ☐ IRDB from SD: drop CC0 Flipper-IRDB .ir files under /ir; flipper_ir.h parses a
+      record and ir_send_flipper (NEC/NECext/Samsung32/SIRC*/RC6) blasts it. Verify
+      addr/cmd byte order matches the real remote (raw + RC5/Kaseikyo still unmapped).
 
 ## WiFi / BLE (native)
 - ☐ Scan lists real APs + clients.
