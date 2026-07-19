@@ -22,6 +22,7 @@
 #include "ir_remote.h"
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
+#include "ble_scan.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -575,13 +576,51 @@ static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   make_label(box, "click = blast it back", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
+  lv_obj_t *p = panel(box);
+  int n = ble_count();
+  if (n <= 0) n = ble_scan(3);
+  if (n <= 0) {
+    make_label(p, "BLE SCAN", &lv_font_unscii_8, C_GREEN);
+    make_label(p, "nothing advertising nearby", &lv_font_montserrat_16, C_SUB);
+    return;
+  }
+  char h[24]; snprintf(h, sizeof h, "%d devices", n);
+  make_label(p, h, &lv_font_unscii_8, C_GREEN);
+  int show = n < 5 ? n : 5;
+  for (int i = 0; i < show; i++) {
+    const char *nm = ble_name(i);
+    if (!nm[0]) nm = ble_addr(i);
+    char line[72];
+    snprintf(line, sizeof line, "%s  %d dBm%s", nm, ble_rssi(i),
+             ble_is_tracker(i) ? "  [TRACKER]" : "");
+    make_label(p, line, &lv_font_montserrat_14, ble_is_tracker(i) ? C_CYAN : C_TXT);
+  }
+  make_label(box, "click = rescan    cyan = tracker", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
   lv_obj_t *p = panel(box);
-  make_label(p, "SWEEP COMPLETE", &lv_font_unscii_8, C_CYAN);
-  make_label(p, "AirTag  -  seen 3x in 8 min", &lv_font_montserrat_16, C_TXT);
-  make_label(p, "moving with you  -  possible follow", &lv_font_montserrat_14, C_AMBER);
-  make_label(p, "Tile  -  seen once  -  looks parked", &lv_font_montserrat_14, C_SUB);
-  make_label(p, "No hidden cameras on WiFi / BLE", &lv_font_montserrat_14, C_GREEN_SFT);
+  int n = ble_count();
+  if (n <= 0) n = ble_scan(3);
+  int trackers = 0;
+  for (int i = 0; i < n; i++) if (ble_is_tracker(i)) trackers++;
+  make_label(p, "BUG SWEEP", &lv_font_unscii_8, C_CYAN);
+  if (trackers > 0) {
+    char h[32]; snprintf(h, sizeof h, "%d tracker(s) near you", trackers);
+    make_label(p, h, &lv_font_montserrat_16, C_AMBER);
+    for (int i = 0; i < n; i++) {
+      if (!ble_is_tracker(i)) continue;
+      const char *nm = ble_name(i);
+      if (!nm[0]) nm = ble_addr(i);
+      char line[64]; snprintf(line, sizeof line, "%s  %d dBm", nm, ble_rssi(i));
+      make_label(p, line, &lv_font_montserrat_14, C_AMBER);
+    }
+  } else {
+    make_label(p, n > 0 ? "No trackers following you" : "scanning...",
+               &lv_font_montserrat_16, C_GREEN_SFT);
+  }
+  make_label(box, "BLE sweep - camera/audio sweep next", &lv_font_montserrat_14, C_SUB);
 }
 
 static void tool_generic(lv_obj_t *box, const Tool &t) {
@@ -606,6 +645,7 @@ static void build_tool(int c, int i) {
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
+  else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else                       tool_generic(box, t);
   load_screen(scr);
