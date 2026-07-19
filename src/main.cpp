@@ -251,6 +251,9 @@ static int *g_edit_val = nullptr;
 static int  g_edit_min, g_edit_max, g_edit_step;
 static void (*g_edit_cb)(int) = nullptr;
 static lv_obj_t *g_edit_label = nullptr;
+// Per-screen ACTION-button handler (e.g. "save this capture to SD"). Cleared on
+// every screen change; invoked by on_action().
+static void (*g_action_cb)() = nullptr;
 // IR universal-remote live brand selector (encoder cycles g_ir_brand).
 static int       g_ir_brand = 0;
 static lv_obj_t *g_ir_name_lbl = nullptr;
@@ -615,6 +618,21 @@ static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
   g_edit_cb = freq_paint;
 }
 
+// Last sub-GHz capture + its on-screen save status (ACTION button writes to SD).
+static uint32_t g_sub_code = 0;
+static uint8_t  g_sub_bits = 0;
+static int      g_sub_proto = 0;
+static lv_obj_t *g_sub_status = nullptr;
+
+static void subghz_save_action() {
+  char body[64];
+  int n = snprintf(body, sizeof body, "protocol:P%d\nbits:%u\ncode:0x%06lX\n",
+                   g_sub_proto, (unsigned)g_sub_bits, (unsigned long)g_sub_code);
+  const char *path = storage_save(SAVE_SUBGHZ, "sub", (const uint8_t *)body, (size_t)n);
+  if (g_sub_status)
+    lv_label_set_text(g_sub_status, (path && path[0]) ? path : "no SD card");
+}
+
 static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
   lv_obj_t *p = panel(box);
   bool live = cc1101_present();
@@ -628,14 +646,16 @@ static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
     make_label(box, "rotate = band    click = replay", &lv_font_unscii_8, C_MUTE);
     return;
   }
+  g_sub_code = code; g_sub_bits = bits; g_sub_proto = proto;    // remember for save
   char h[40]; rcs_fmt(code, bits, proto, h, sizeof h);
   make_label(p, got ? "CAPTURED" : "DEMO CAPTURE", &lv_font_unscii_8,
              got ? C_GREEN : C_AMBER);
   make_label(p, h, &lv_font_montserrat_20, C_TXT);
   make_label(p, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
-  make_label(p, got ? "click to replay this remote" : "demo - CC1101 not detected",
-             &lv_font_montserrat_14, got ? C_GREEN_SFT : C_AMBER);
-  make_label(box, "captures & replays -> SD", &lv_font_unscii_8, C_MUTE);
+  g_sub_status = make_label(p, "ACTION = save to /subghz", &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(box, "ACTION saves .sub -> SD    click = replay",
+             &lv_font_unscii_8, C_MUTE);
+  g_action_cb = subghz_save_action;              // ACTION button now saves this capture
 }
 
 static void tool_ism(lv_obj_t *box) {            // Sub-GHz > ISM decoder
@@ -1503,6 +1523,7 @@ static void build_settings() {
 static void render_top() {
   g_edit_val = nullptr;                           // leaving any screen exits edit mode
   g_edit_label = nullptr;
+  g_action_cb = nullptr;                          // and clears its ACTION handler
   if (g_cfg_dirty) { save_config_now(); g_cfg_dirty = false; }   // persist on exit
   NavEntry &e = nav_stack[nav_depth - 1];
   switch (e.t) {
@@ -1529,8 +1550,9 @@ static void nav_home() {
   nav_stack[0] = { SCR_HOME, 0, 0 };
   render_top();
 }
-static void on_action() {                          // context key — reserved
-  Serial.println("[ui] ACTION");
+static void on_action() {                          // context key
+  if (g_action_cb) g_action_cb();
+  else Serial.println("[ui] ACTION");
 }
 
 // ---------------------------------------------------------------- styles
