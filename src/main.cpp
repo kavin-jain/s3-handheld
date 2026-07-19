@@ -741,23 +741,38 @@ static void tool_emv(lv_obj_t *box) {            // RFID/NFC > Bank card read
   make_label(box, "public data only - PN532 APDU = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
+// Last NFC UID (hex) + save status; ACTION writes it to /nfc.
+static char      g_nfc_uid[24] = "04:A2:1B:9C";
+static lv_obj_t *g_nfc_status = nullptr;
+
+static void nfc_save_action() {
+  size_t ul = 0; while (g_nfc_uid[ul]) ul++;
+  const char *path = storage_save(SAVE_NFC, "nfc", (const uint8_t *)g_nfc_uid, ul);
+  if (g_nfc_status)
+    lv_label_set_text(g_nfc_status, (path && path[0]) ? path : "no SD card");
+}
+
 static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   lv_obj_t *p = panel(box);
   if (!nfc_present()) {
     make_label(p, "NFC READ", &lv_font_unscii_8, C_AMBER);
     make_label(p, "demo - PN532 not detected", &lv_font_montserrat_16, C_AMBER);
     make_label(p, "UID 04:A2:1B:9C  -  Mifare Classic 1K", &lv_font_montserrat_14, C_SUB);
-    make_label(box, "click to crack keys (dictionary)", &lv_font_unscii_8, C_MUTE);
+    g_nfc_status = make_label(p, "ACTION = save to /nfc", &lv_font_unscii_8, C_GREEN_SFT);
+    make_label(box, "ACTION saves UID    click = crack keys", &lv_font_unscii_8, C_MUTE);
+    g_action_cb = nfc_save_action;               // demo UID is still saveable
     return;
   }
   uint8_t uid[7], len = 0;
   if (nfc_read_uid(uid, &len)) {
-    char h[24]; nfc_uid_hex(uid, len, h, sizeof h);
+    nfc_uid_hex(uid, len, g_nfc_uid, sizeof g_nfc_uid);
     make_label(p, "CARD", &lv_font_unscii_8, C_GREEN);
-    make_label(p, h, &lv_font_montserrat_20, C_TXT);
+    make_label(p, g_nfc_uid, &lv_font_montserrat_20, C_TXT);
     make_label(p, len == 4 ? "Mifare Classic / NTAG" : "7-byte UID card",
                &lv_font_montserrat_14, C_SUB);
-    make_label(p, "click to crack keys (dictionary)", &lv_font_montserrat_14, C_GREEN_SFT);
+    g_nfc_status = make_label(p, "ACTION = save to /nfc", &lv_font_montserrat_14, C_GREEN_SFT);
+    make_label(box, "ACTION saves UID    click = crack keys", &lv_font_unscii_8, C_MUTE);
+    g_action_cb = nfc_save_action;
   } else {
     make_label(p, "PN532 READY", &lv_font_unscii_8, C_GREEN);
     make_label(p, "tap a card to the antenna", &lv_font_montserrat_16, C_TXT);
