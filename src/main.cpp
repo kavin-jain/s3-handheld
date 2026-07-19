@@ -40,6 +40,7 @@
 #include "evilportal.h"
 #include "handshake.h"
 #include "wardrive.h"
+#include "buspirate.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -855,6 +856,20 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_buspirate(lv_obj_t *box) {      // Tools > Bus Pirate
+  lv_obj_t *p = panel(box);
+  make_label(p, "I2C SCAN", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "sniff & probe I2C/SPI/UART", &lv_font_montserrat_16, C_TXT);
+  // Demo: name the addresses this board is expected to answer at.
+  const uint8_t addrs[] = {0x20, 0x24, 0x36, 0x68};
+  char h[64]; int o = 0;
+  for (unsigned k = 0; k < sizeof addrs; k++)
+    o += snprintf(h + o, sizeof h - o, k ? " %02X" : "%02X", addrs[k]);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, i2c_device_name(0x24), &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "live bus scan (Wire) = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_wardrive(lv_obj_t *box) {       // WiFi > Wardrive
   lv_obj_t *p = panel(box);
   char row[128];
@@ -1072,6 +1087,7 @@ static void build_tool(int c, int i) {
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
+  else if (c == 10 && i == 0) tool_buspirate(box);    // Tools / Bench > Bus Pirate
   else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
