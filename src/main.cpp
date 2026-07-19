@@ -38,6 +38,7 @@
 #include "mousejack.h"
 #include "karma.h"
 #include "evilportal.h"
+#include "handshake.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -853,6 +854,22 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_handshake(lv_obj_t *box) {      // WiFi > Handshake / PMKID
+  lv_obj_t *p = panel(box);
+  // Demo: M1 + M2 captured (enough to crack offline).
+  uint8_t got = (1 << 0) | (1 << 1);
+  bool crack = handshake_crackable(got);
+  make_label(p, "HANDSHAKE", &lv_font_unscii_8, C_AMBER);
+  make_label(p, "capture WPA2 4-way -> SD", &lv_font_montserrat_16, C_TXT);
+  char h[48]; snprintf(h, sizeof h, "M1:%c M2:%c M3:- M4:-",
+                       got & 1 ? 'y' : '-', got & 2 ? 'y' : '-');
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, crack ? "crackable - saved .pcap" : "waiting for handshake",
+             &lv_font_montserrat_14, crack ? C_GREEN_SFT : C_AMBER);
+  make_label(box, "deauth to force reconnect - own AP only",
+             &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_evilportal(lv_obj_t *box) {     // WiFi > Evil Portal
   lv_obj_t *p = panel(box);
   // Demo: a credential POST the fake login page would capture.
@@ -1032,6 +1049,7 @@ static void build_tool(int c, int i) {
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
   else if (c == 3 && i == 2) tool_evilportal(box);    // WiFi > Evil Portal
+  else if (c == 3 && i == 3) tool_handshake(box);     // WiFi > Handshake / PMKID
   else if (c == 3 && i == 5) tool_karma(box);         // WiFi > Karma / MANA
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
