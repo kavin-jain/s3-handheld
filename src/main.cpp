@@ -63,6 +63,7 @@
 #include "csi_motion.h"
 #include "ui_edit.h"
 #include "espnow_mesh.h"
+#include "usbhost.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -814,6 +815,23 @@ static void tool_espnow(lv_obj_t *box) {         // Comms / Off-grid > ESP-NOW m
   make_label(box, "router-free - click to broadcast ping", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_usbhost(lv_obj_t *box) {        // Comms / Off-grid > USB host
+  lv_obj_t *p = panel(box);
+  // Demo MBR: one FAT32 partition, 2048 LBA start.
+  uint8_t mbr[512] = {0};
+  mbr[510] = 0x55; mbr[511] = 0xAA;
+  uint8_t *e = mbr + MBR_PART0_OFF;
+  e[4] = 0x0C; e[9] = 0x08; e[12] = 0x40; e[13] = 0x42; e[14] = 0x0F;
+  make_label(p, "USB HOST", &lv_font_unscii_8, C_GREEN);
+  make_label(p, mbr_valid(mbr) ? "drive mounted" : "no MBR",
+             &lv_font_montserrat_16, C_TXT);
+  char h[48]; snprintf(h, sizeof h, "P1 %s  %lu MB", mbr_part_type(e[4]),
+                       (unsigned long)(mbr_part_sectors(e) / 2048));
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "browse & copy files to SD", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "USB MSC host enumeration = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
   lv_obj_t *p = panel(box);
   int pct = usage_pct(62, 100);                  // demo — real data via phone bridge
@@ -1326,6 +1344,7 @@ static void build_tool(int c, int i) {
   else if (c == 10 && i == 1) tool_fwdump(box);       // Tools / Bench > Firmware dump
   else if (c == 10 && i == 2) tool_gpio(box);         // Tools / Bench > GPIO play
   else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
+  else if (c == 11 && i == 1) tool_usbhost(box);      // Comms / Off-grid > USB host
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 12 && i == 1) tool_calendar(box);     // Me > Calendar
   else if (c == 12 && i == 2) tool_tasks(box);        // Me > Tasks
