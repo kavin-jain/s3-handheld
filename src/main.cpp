@@ -28,6 +28,7 @@
 #include "nrf24_radio.h"
 #include "nrf_band.h"
 #include "camera_detect.h"
+#include "tvbgone.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -600,6 +601,16 @@ static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
   make_label(box, "only on machines you own", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
+  // Info only — never blasts on screen build; firing is a deliberate ACTION step.
+  lv_obj_t *p = panel(box);
+  make_label(p, "TV-B-GONE", &lv_font_unscii_8, C_GREEN);
+  char h[40]; snprintf(h, sizeof h, "%d TV power codes ready", tvb_count());
+  make_label(p, h, &lv_font_montserrat_16, C_TXT);
+  make_label(p, "Samsung / LG / Sony / NEC / Philips", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "click = blast all (turns TVs off)", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   lv_obj_t *p = panel(box);
   make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
@@ -708,6 +719,8 @@ static void build_tool(int c, int i) {
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
+  else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
+  else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
