@@ -10,3 +10,8 @@ void    nrf_scan();                 // carrier sweep (cached)
 bool    nrf_scanned();
 int     nrf_busiest_ch();
 uint8_t nrf_activity(int ch);
+
+// Mousejack: inject a keystroke stream (mousejack_stream frames, 10 B each) at a
+// sniffed dongle address on the given channel. Bring-up. Authorized/own-gear only.
+bool    nrf_mousejack_inject(const uint8_t addr[5], int channel,
+                             const uint8_t frames[][10], int n);

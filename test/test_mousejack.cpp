@@ -28,5 +28,24 @@ int main() {
   // With a modifier (Ctrl=0x01) + device index, invariant still holds.
   mousejack_key(0x02, 0x01, 0x06, f);   // Ctrl+'c'
   assert(sums_to_zero(f, UNIFYING_KBD_LEN));
+
+  // Full injection stream: press+release per char.
+  uint8_t stream[16][UNIFYING_KBD_LEN];
+  int cnt = mousejack_stream(0x00, "hi", stream, 16);
+  assert(cnt == 4);                                  // 2 chars * (press+release)
+  // 'h' = HID 0x0B: press then release.
+  assert(stream[0][2] == 0x00 && stream[0][3] == 0x0B);   // press h, no shift
+  assert(stream[1][3] == 0x00);                            // release
+  assert(stream[2][3] == 0x0C);                            // press i
+  // Every frame in the stream is a valid Unifying frame (checksum).
+  for (int i = 0; i < cnt; i++) assert(sums_to_zero(stream[i], UNIFYING_KBD_LEN));
+
+  // Shifted char sets the Left-Shift modifier on the press frame.
+  cnt = mousejack_stream(0x00, "A", stream, 16);
+  assert(cnt == 2 && stream[0][2] == 0x02 && stream[0][3] == 0x04);
+
+  // max_frames is respected (never overruns the buffer).
+  cnt = mousejack_stream(0x00, "abcdef", stream, 4);
+  assert(cnt <= 4);
   return 0;
 }

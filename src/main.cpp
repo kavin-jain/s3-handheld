@@ -908,14 +908,15 @@ static void tool_keysniff(lv_obj_t *box) {       // NRF24 / 2.4GHz > Keyboard sn
 
 static void tool_mousejack(lv_obj_t *box) {      // NRF24 / 2.4GHz > Mousejack
   lv_obj_t *p = panel(box);
-  uint8_t f[UNIFYING_KBD_LEN];
-  mousejack_key(0x00, 0x00, 0x04, f);            // demo: an 'a' keystroke frame
+  const char *payload = "powershell -w hidden";  // demo attack payload
+  uint8_t frames[48][UNIFYING_KBD_LEN];
+  int n = mousejack_stream(0x00, payload, frames, 48);
   make_label(p, "MOUSEJACK", &lv_font_unscii_8, C_AMBER);
-  make_label(p, "inject into wireless kbd/mouse", &lv_font_montserrat_16, C_TXT);
-  char hx[40]; snprintf(hx, sizeof hx, "Unifying frame  cksum %02X  (sum 0)", f[9]);
+  make_label(p, "inject keystrokes into a dongle", &lv_font_montserrat_16, C_TXT);
+  char hx[48]; snprintf(hx, sizeof hx, "payload -> %d HID frames", n);
   make_label(p, hx, &lv_font_unscii_8, C_SUB);
-  make_label(p, "unencrypted Logitech dongles", &lv_font_montserrat_14, C_AMBER);
-  make_label(box, "nRF24 ESB inject = bring-up - own gear only",
+  make_label(p, "unencrypted Logitech Unifying", &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "sniff addr + inject = bring-up - own gear only",
              &lv_font_unscii_8, C_MUTE);
 }
 

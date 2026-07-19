@@ -44,7 +44,8 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 
 ## NRF24 (2×NRF24, SPI-B) — add 10 µF caps first
 - ☐ Band scanner shows 2.4 GHz activity.
-- ☐ Mousejack detects a vulnerable dongle; injected 'a' frame moves a cursor.
+- ☐ Mousejack: sniff a dongle address, nrf_mousejack_inject a mousejack_stream payload,
+      verify keystrokes land in a text editor on the paired host (own gear only).
 - ☐ Keyboard sniff decodes real keystrokes from an unencrypted 2.4 GHz kbd.
 
 ## Sub-GHz — extras

