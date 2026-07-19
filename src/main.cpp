@@ -32,6 +32,7 @@
 #include "tvbgone.h"
 #include "wof.h"
 #include "usage_fmt.h"
+#include "df_logic.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -576,6 +577,24 @@ static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
   make_label(box, "click = rescan    red = open network", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_df(lv_obj_t *box) {             // See invisible > Direction finder
+  static int prev = -80;
+  lv_obj_t *p = panel(box);
+  make_label(p, "DIRECTION FINDER", &lv_font_unscii_8, C_GREEN);
+  if (!cc1101_present()) {
+    make_label(p, "demo - CC1101 not detected", &lv_font_montserrat_16, C_AMBER);
+    make_label(p, "433.92 MHz  -70 dBm  WARMER", &lv_font_montserrat_14, C_SUB);
+    return;
+  }
+  int rssi = cc1101_rssi_at(433.92f);
+  int t = df_trend(rssi, prev);
+  prev = rssi;
+  char h[40]; snprintf(h, sizeof h, "%d dBm  %s", rssi, df_label(t));
+  make_label(p, h, &lv_font_montserrat_20, t > 0 ? C_GREEN : t < 0 ? C_RED : C_TXT);
+  make_label(p, "walk around - click to sample", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "warmer = closer to the transmitter", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanner
   lv_obj_t *p = panel(box);
   if (!nrf_present()) {
@@ -779,6 +798,7 @@ static void build_tool(int c, int i) {
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
+  else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
