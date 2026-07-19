@@ -43,6 +43,7 @@
 #include "buspirate.h"
 #include "fwdump.h"
 #include "droneid.h"
+#include "skimmer.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -858,6 +859,20 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_skimmer(lv_obj_t *box) {        // Am I safe? > Skimmer detector
+  lv_obj_t *p = panel(box);
+  const char *seen = "HC-05";                    // demo: a flagged nearby module
+  bool hit = is_skimmer_name(seen);
+  make_label(p, "SKIMMER DETECTOR", &lv_font_unscii_8, C_CYAN);
+  make_label(p, hit ? "SUSPECT MODULE NEARBY" : "no skimmer signatures",
+             &lv_font_montserrat_16, hit ? C_RED : C_GREEN_SFT);
+  char h[40]; snprintf(h, sizeof h, "BLE name: \"%s\"", seen);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "generic BT modules used by skimmers",
+             &lv_font_montserrat_14, C_SUB);
+  make_label(box, "scan at pumps/ATMs - BLE scan bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_droneid(lv_obj_t *box) {        // Am I safe? > Drone spotter
   lv_obj_t *p = panel(box);
   // Demo Remote-ID: Basic ID + a Location fix.
@@ -1128,6 +1143,7 @@ static void build_tool(int c, int i) {
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
+  else if (c == 7 && i == 4) tool_skimmer(box);       // Am I safe? > Skimmer detector
   else if (c == 7 && i == 5) tool_droneid(box);       // Am I safe? > Drone spotter
   else                       tool_generic(box, t);
   load_screen(scr);
