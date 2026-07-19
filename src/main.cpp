@@ -18,6 +18,7 @@
 #include "radio_cc1101.h"
 #include "subghz_classify.h"
 #include "subghz_replay.h"
+#include "pt2262.h"
 #include "wmbus.h"
 #include "amiibo.h"
 #include "emv.h"
@@ -610,6 +611,21 @@ static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
   make_label(p, got ? "click to replay this remote" : "demo - CC1101 not detected",
              &lv_font_montserrat_14, got ? C_GREEN_SFT : C_AMBER);
   make_label(box, "captures & replays -> SD", &lv_font_unscii_8, C_MUTE);
+}
+
+static void tool_ism(lv_obj_t *box) {            // Sub-GHz > ISM decoder
+  lv_obj_t *p = panel(box);
+  uint32_t code = 0x00FF0F; int bits = 24;       // demo captured gate code
+  char tri[16]; pt2262_tristate(code, bits, tri);
+  make_label(p, "433 ISM DECODER", &lv_font_unscii_8, C_GREEN);
+  char h[40]; snprintf(h, sizeof h, "0x%06lX  (%d bit)", (unsigned long)code, bits);
+  make_label(p, h, &lv_font_montserrat_16, C_TXT);
+  char t[24]; snprintf(t, sizeof t, "PT2262: %s", tri);
+  make_label(p, t, &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(p, pt2262_is_valid(tri) ? "valid tri-state frame" : "not PT2262",
+             &lv_font_montserrat_14, C_SUB);
+  make_label(box, "gate/garage remotes - CC1101 RX bring-up",
+             &lv_font_unscii_8, C_MUTE);
 }
 
 static void tool_wmbus(lv_obj_t *box) {          // Sub-GHz > wM-Bus meter
@@ -1309,6 +1325,7 @@ static void build_tool(int c, int i) {
   lv_obj_t *box = content_box(scr);
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
   else if (c == 0 && i == 1) tool_subghz_capture(box);// Sub-GHz > Capture & replay
+  else if (c == 0 && i == 4) tool_ism(box);           // Sub-GHz > ISM decoder
   else if (c == 0 && i == 5) tool_wmbus(box);         // Sub-GHz > wM-Bus meter
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
   else if (c == 1 && i == 1) tool_mifare(box);        // RFID/NFC > Mifare crack
