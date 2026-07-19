@@ -9,13 +9,13 @@
 #include <string.h>
 #include <stdlib.h>
 
-struct DeviceCfg { int bright; int dim_s; int sleep_s; int theme; };
+struct DeviceCfg { int bright; int dim_s; int sleep_s; int theme; int power; };
 
-// "bright=80;dim=20;sleep=35;theme=0". Returns length, or 0 on overflow/bad args.
+// "bright=80;dim=20;sleep=35;theme=0;power=2". Returns length, or 0 on overflow.
 static inline size_t cfg_serialize(const DeviceCfg *c, char *out, size_t cap) {
   if (!c || !out || cap == 0) return 0;
-  int n = snprintf(out, cap, "bright=%d;dim=%d;sleep=%d;theme=%d",
-                   c->bright, c->dim_s, c->sleep_s, c->theme);
+  int n = snprintf(out, cap, "bright=%d;dim=%d;sleep=%d;theme=%d;power=%d",
+                   c->bright, c->dim_s, c->sleep_s, c->theme, c->power);
   if (n < 0 || (size_t)n >= cap) { out[0] = 0; return 0; }
   return (size_t)n;
 }
@@ -36,5 +36,6 @@ static inline bool cfg_parse(const char *s, DeviceCfg *c) {
   c->dim_s   = cfg_int_after(s, "dim",    c->dim_s);
   c->sleep_s = cfg_int_after(s, "sleep",  c->sleep_s);
   c->theme   = cfg_int_after(s, "theme",  c->theme);
+  c->power   = cfg_int_after(s, "power",  c->power);
   return true;
 }

@@ -16,6 +16,8 @@
 #include "pins.h"
 #include "storage.h"
 #include "config.h"
+#include "power_ctl.h"
+#include "power_level.h"
 #include "radio_cc1101.h"
 #include "subghz_classify.h"
 #include "subghz_replay.h"
@@ -216,7 +218,8 @@ static const Category CATS[] = {
 static const uint8_t N_CATS = sizeof(CATS) / sizeof(CATS[0]);
 
 // ---------------------------------------------------------------- nav + input
-enum ScreenT : uint8_t { SCR_HOME, SCR_AROUND, SCR_CATEGORY, SCR_TOOL, SCR_SETTINGS, SCR_EDIT_BRIGHT };
+enum ScreenT : uint8_t { SCR_HOME, SCR_AROUND, SCR_CATEGORY, SCR_TOOL, SCR_SETTINGS,
+                         SCR_EDIT_BRIGHT, SCR_EDIT_POWER };
 struct NavEntry { ScreenT t; int8_t cat; int8_t tool; };
 static NavEntry nav_stack[8];
 static uint8_t  nav_depth = 0;
@@ -249,6 +252,7 @@ static void bl_write(uint8_t duty) {
 // When g_edit_val is non-null, encoder rotation changes *g_edit_val instead of
 // moving list focus. Cleared on every screen change (render_top).
 static int  g_bright_pct = 100;
+static int  g_power_lvl = PWR_MAX;              // global intensity (scales radio TX power)
 static int *g_edit_val = nullptr;
 static int  g_edit_min, g_edit_max, g_edit_step;
 static void (*g_edit_cb)(int) = nullptr;
@@ -276,14 +280,21 @@ static void apply_brightness(int pct) {
 // Settings persistence: serialise current prefs to /config.txt (see config.h).
 static bool g_cfg_dirty = false;
 static void save_config_now() {
-  DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0};
-  char line[64];
+  DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl};
+  char line[72];
   if (cfg_serialize(&cfg, line, sizeof line)) storage_save_config(line);
 }
 // Brightness edit callback: apply live, update its label, mark dirty.
 static void bright_edit_cb(int pct) {
   apply_brightness(pct);
   if (g_edit_label) lv_label_set_text_fmt(g_edit_label, "%d%%", pct);
+  g_cfg_dirty = true;
+}
+
+// Global intensity dial (Low/Med/Max) — scales every radio's TX power.
+static void power_edit_cb(int lvl) {
+  set_power_level(lvl);                           // radios read this on next use
+  if (g_edit_label) lv_label_set_text(g_edit_label, pwr_name(lvl));
   g_cfg_dirty = true;
 }
 
@@ -497,6 +508,7 @@ static void build_category(int c);
 static void build_tool(int c, int i);
 static void build_settings();
 static void build_edit_bright();
+static void build_edit_power();
 
 static lv_obj_t *new_screen(const char *title) {
   lv_group_remove_all_objs(g_group);          // detach old (about to be deleted)
@@ -1571,12 +1583,28 @@ static void build_edit_bright() {
   g_edit_cb = bright_edit_cb;
 }
 
+static void build_edit_power() {
+  lv_obj_t *scr = new_screen("INTENSITY");
+  section(scr, "ROTATE: LOW / MED / MAX - BACK TO SAVE");
+  lv_obj_t *box = content_box(scr);
+  lv_obj_t *p = panel(box);
+  g_edit_label = make_label(p, pwr_name(g_power_lvl), &lv_font_montserrat_28, C_GREEN);
+  make_label(p, "TX power for every radio", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "Max can exceed local power limits", &lv_font_unscii_8, C_AMBER);
+  load_screen(scr);
+  g_edit_val = &g_power_lvl;
+  g_edit_min = 0; g_edit_max = PWR_N - 1; g_edit_step = 1;
+  g_edit_cb = power_edit_cb;
+}
+
 static void build_settings() {
   lv_obj_t *scr = new_screen("SETTINGS");
   lv_obj_t *list = make_list(scr);
   char buf[40];
   snprintf(buf, sizeof(buf), "%d %%  (rotate to change)", g_bright_pct);
   add_row(list, "BRT", C_GREEN, "Brightness", buf, NULL, 0, 0, nav_code(SCR_EDIT_BRIGHT, 0, 0));
+  snprintf(buf, sizeof(buf), "%s  (rotate to change)", pwr_name(g_power_lvl));
+  add_row(list, "INT", C_AMBER, "Intensity", buf, NULL, 0, 0, nav_code(SCR_EDIT_POWER, 0, 0));
   snprintf(buf, sizeof(buf), "dim %ds  sleep %ds", DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000);
   add_row(list, "PWR", C_GREEN, "Sleep timers", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
   add_row(list, "THM", C_GREEN, "Theme", "phosphor green", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
@@ -1604,6 +1632,7 @@ static void render_top() {
     case SCR_TOOL:        build_tool(e.cat, e.tool);  break;
     case SCR_SETTINGS:    build_settings();           break;
     case SCR_EDIT_BRIGHT: build_edit_bright();        break;
+    case SCR_EDIT_POWER:  build_edit_power();         break;
   }
 }
 static void nav_push(ScreenT t, int cat, int tool) {
@@ -1680,13 +1709,16 @@ void setup() {
 
   // Restore saved prefs (brightness is the runtime-applicable one; timers are
   // compile-time for now). Falls back to defaults when no card / no file.
-  char cfgline[64];
+  char cfgline[72];
   if (storage_load_config(cfgline, sizeof cfgline)) {
-    DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0};
+    DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl};
     cfg_parse(cfgline, &cfg);
     g_bright_pct = cfg.bright < 10 ? 10 : cfg.bright > 100 ? 100 : cfg.bright;
     apply_brightness(g_bright_pct);
-    Serial.printf("[cfg] restored brightness %d%%\n", g_bright_pct);
+    g_power_lvl = pwr_clamp(cfg.power);
+    set_power_level(g_power_lvl);
+    Serial.printf("[cfg] restored brightness %d%%, intensity %s\n",
+                  g_bright_pct, pwr_name(g_power_lvl));
   }
 
   cc1101_begin();

@@ -1,5 +1,7 @@
 #include "nrf24_radio.h"
 #include "nrf_band.h"
+#include "power_ctl.h"
+#include "power_level.h"
 #include "pins.h"
 #include <Arduino.h>
 #include <SPI.h>
@@ -21,7 +23,7 @@ static void ensure() {
   nrfSPI.begin(PIN_SPIB_SCLK, PIN_SPIB_MISO, PIN_SPIB_MOSI, PIN_NRF24_1_CS);
   s_present = radio.begin(&nrfSPI) && radio.isChipConnected();
   if (s_present) {
-    radio.setPALevel(RF24_PA_MAX);           // MAX TX power (+ external PA/LNA if fitted)
+    radio.setPALevel((rf24_pa_dbm_e)pwr_nrf24_pa(power_level()));  // intensity dial
     radio.setDataRate(RF24_2MBPS);           // full throughput; drop to 250KBPS for range
     radio.setAutoAck(false);                 // don't ACK — raw scan/inject
     radio.setCRCLength(RF24_CRC_DISABLED);   // promiscuous: accept everything

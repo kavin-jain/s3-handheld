@@ -1,6 +1,8 @@
 #include "radio_cc1101.h"
 #include "subghz_classify.h"
 #include "subghz_replay.h"
+#include "power_ctl.h"
+#include "power_level.h"
 #include "pins.h"
 #include <Arduino.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
@@ -57,7 +59,7 @@ static void sgx_async(float mhz) {
   ELECHOUSE_cc1101.setCCMode(0);              // async raw serial mode (not packet)
   ELECHOUSE_cc1101.setModulation(2);          // ASK/OOK
   ELECHOUSE_cc1101.setMHZ(mhz);
-  ELECHOUSE_cc1101.setPA(12);                 // MAX TX power (+12 dBm) for replay.
+  ELECHOUSE_cc1101.setPA(pwr_cc1101_dbm(power_level()));   // intensity dial (max +12 dBm)
   // setPA is frequency-dependent, so it must follow setMHZ. NOTE: +12 dBm can
   // exceed local ISM ERP limits (433/868/915) — legal to run only where allowed.
 }

@@ -1,4 +1,6 @@
 #include "wifi_scan.h"
+#include "power_ctl.h"
+#include "power_level.h"
 #include <WiFi.h>
 #include <esp_wifi.h>
 
@@ -10,7 +12,7 @@ static int  s_count = 0;
 static void ensure_begin() {
   if (!s_begun) {
     WiFi.mode(WIFI_STA); WiFi.disconnect();
-    esp_wifi_set_max_tx_power(84);            // MAX WiFi TX power (~20.5 dBm)
+    esp_wifi_set_max_tx_power(pwr_wifi_qdbm(power_level()));   // intensity dial
     s_begun = true;
   }
 }

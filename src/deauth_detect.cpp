@@ -1,4 +1,6 @@
 #include "deauth_detect.h"
+#include "power_ctl.h"
+#include "power_level.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -18,7 +20,7 @@ static void promisc_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
 void deauth_begin() {
   if (s_on) return;
   WiFi.mode(WIFI_STA);
-  esp_wifi_set_max_tx_power(84);              // MAX TX power (~20.5 dBm) for the kick
+  esp_wifi_set_max_tx_power(pwr_wifi_qdbm(power_level()));   // intensity dial
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_promiscuous_rx_cb(&promisc_cb);
   s_on = true;
