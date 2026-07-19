@@ -19,6 +19,7 @@
 #include "subghz_classify.h"
 #include "subghz_replay.h"
 #include "wmbus.h"
+#include "amiibo.h"
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
 #include "ndef.h"
@@ -605,6 +606,20 @@ static void tool_wmbus(lv_obj_t *box) {          // Sub-GHz > wM-Bus meter
   make_label(box, "reads utility meters (T/C mode, 868 MHz)", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_amiibo(lv_obj_t *box) {         // RFID/NFC > Amiibo clone
+  lv_obj_t *p = panel(box);
+  uint8_t d[NTAG215_SIZE] = {0};                 // demo dump: NTAG215 CC + Mario id
+  d[12] = 0xE1; d[13] = 0x10; d[14] = 0x3E; d[15] = 0x00;
+  d[AMIIBO_ID_OFF + 7] = 0x02;
+  char id[17]; amiibo_id_hex(d, id);
+  bool ok = ntag215_is_amiibo(d, sizeof d);
+  make_label(p, ok ? "NTAG215 AMIIBO" : "NOT AMIIBO", &lv_font_unscii_8, C_GREEN);
+  make_label(p, id, &lv_font_montserrat_20, C_TXT);
+  make_label(p, "figure id (page 21)", &lv_font_montserrat_14, C_SUB);
+  make_label(p, "demo - PN532 dump/write = bring-up", &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "clone amiibo -> blank NTAG215", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
   lv_obj_t *p = panel(box);
   if (!nfc_present()) {
@@ -917,6 +932,7 @@ static void build_tool(int c, int i) {
   else if (c == 0 && i == 1) tool_subghz_capture(box);// Sub-GHz > Capture & replay
   else if (c == 0 && i == 5) tool_wmbus(box);         // Sub-GHz > wM-Bus meter
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
+  else if (c == 1 && i == 5) tool_amiibo(box);        // RFID/NFC > Amiibo clone
   else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
   else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
   else if (c == 1 && i == 6) tool_ibutton(box);       // RFID/NFC > iButton key
