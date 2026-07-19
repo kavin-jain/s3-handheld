@@ -6,9 +6,13 @@
 // Reserved, never use: GPIO 26-32 (flash), 33-37 (octal PSRAM).
 #pragma once
 
-// ---- Display (SPI-A) — mirrored from platformio.ini TFT_* build flags ----
-// TFT pins are configured through TFT_eSPI's build flags, not here; listed
-// as comments so the map is complete: SCLK12 MOSI11 MISO13 CS10 DC14 RST21.
+// ---- Display + onboard microSD share SPI-A (HSPI) ----
+// TFT pins go to TFT_eSPI via platformio.ini build flags (CS10 DC14 RST21).
+// The SD sits on the same bus with its own chip-select (GPIO9). Bus pins:
+#define PIN_SPIA_SCLK     12
+#define PIN_SPIA_MOSI     11
+#define PIN_SPIA_MISO     13
+#define PIN_SD_CS         9      // onboard microSD chip-select (leave to the board)
 
 // ---- Backlight (power) ----
 // Panel "LED/BL" ships tied to 3V3 (always on). To enable dimming/auto-off,

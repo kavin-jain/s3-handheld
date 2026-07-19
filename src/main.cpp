@@ -14,6 +14,7 @@
 #include "esp_sleep.h"
 #include "driver/gpio.h"
 #include "pins.h"
+#include "storage.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -309,7 +310,7 @@ static void build_statusbar(lv_obj_t *scr, const char *title) {
   make_label(bar, title, &lv_font_unscii_8, C_GREEN);
   lv_obj_t *sp = plain(bar); lv_obj_set_flex_grow(sp, 1); lv_obj_set_height(sp, 1);
   make_label(bar, LV_SYMBOL_GPS, &lv_font_montserrat_14, C_MUTE);
-  make_label(bar, LV_SYMBOL_SD_CARD, &lv_font_montserrat_14, C_MUTE);
+  make_label(bar, LV_SYMBOL_SD_CARD, &lv_font_montserrat_14, storage_ready() ? C_GREEN : C_MUTE);
   make_label(bar, LV_SYMBOL_BATTERY_FULL " 82%", &lv_font_unscii_8, C_GREEN_SFT);
 }
 
@@ -538,7 +539,12 @@ static void build_settings() {
   snprintf(buf, sizeof(buf), "dim %ds  sleep %ds", DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000);
   add_row(list, "PWR", C_GREEN, "Sleep timers", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
   add_row(list, "THM", C_GREEN, "Theme", "phosphor green", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
-  add_row(list, "SD",  C_GREEN, "Storage", "save captures to card", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  if (storage_ready())
+    snprintf(buf, sizeof(buf), "SD %lu / %lu MB used", (unsigned long)storage_used_mb(),
+             (unsigned long)storage_total_mb());
+  else
+    snprintf(buf, sizeof(buf), "no card - insert to save");
+  add_row(list, "SD", storage_ready() ? C_GREEN : C_SUB, "Storage", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
   add_row(list, "?",   C_SUB,   "About", "Edgehax S3-PRO  -  fw m2", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
   load_screen(scr);
 }
@@ -619,6 +625,11 @@ void setup() {
   tft.init();
   tft.setRotation(1);
   tft.setSwapBytes(true);
+
+  // SD shares SPI-A with the TFT — mount after the display bus is up.
+  storage_begin();
+  Serial.printf("[sd] %s (%lu/%lu MB)\n", storage_ready() ? "mounted" : "no card",
+                (unsigned long)storage_used_mb(), (unsigned long)storage_total_mb());
 
   lv_init();
   lv_disp_draw_buf_init(&draw_buf, buf1, NULL, SCR_W * 40);
