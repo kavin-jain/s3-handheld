@@ -837,6 +837,21 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_deauth_atk(lv_obj_t *box) {     // WiFi > Deauth (authorized)
+  lv_obj_t *p = panel(box);
+  const uint8_t bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  const uint8_t bssid[6] = {0x00,0x11,0x22,0x33,0x44,0x55};
+  uint8_t f[DEAUTH_FRAME_LEN];
+  deauth_frame(bcast, bssid, 7, f);              // demo frame the tool would send
+  make_label(p, "DEAUTH", &lv_font_unscii_8, C_AMBER);
+  make_label(p, "kick a client off an AP", &lv_font_montserrat_16, C_TXT);
+  char hx[40]; snprintf(hx, sizeof hx, "FC %02X%02X   reason %d", f[0], f[1], f[24]);
+  make_label(p, hx, &lv_font_unscii_8, C_SUB);
+  make_label(p, "YOUR OWN NETWORK ONLY", &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "pick AP + client, click to send - TX bring-up",
+             &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_ibutton(lv_obj_t *box) {        // RFID/NFC > iButton key
   lv_obj_t *p = panel(box);
   make_label(p, "IBUTTON / 1-WIRE", &lv_font_unscii_8, C_GREEN);
@@ -967,6 +982,7 @@ static void build_tool(int c, int i) {
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
+  else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
