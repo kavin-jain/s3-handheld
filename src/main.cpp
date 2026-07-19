@@ -255,6 +255,12 @@ static lv_obj_t *g_edit_label = nullptr;
 static int       g_ir_brand = 0;
 static lv_obj_t *g_ir_name_lbl = nullptr;
 static lv_obj_t *g_ir_code_lbl = nullptr;
+// Sub-GHz frequency finder live band selector (encoder cycles g_freq_idx).
+static const float FREQ_PRESETS[] = {300.0f, 315.0f, 390.0f, 433.92f, 868.0f, 915.0f};
+static const int   FREQ_N = sizeof(FREQ_PRESETS) / sizeof(FREQ_PRESETS[0]);
+static int       g_freq_idx = 3;               // default 433.92 MHz
+static lv_obj_t *g_freq_mhz = nullptr, *g_freq_sub = nullptr;
+static lv_obj_t *g_freq_guess = nullptr, *g_freq_bar = nullptr;
 
 static void apply_brightness(int pct) {
   bl_user_duty = (uint8_t)(pct * 255 / 100);
@@ -577,36 +583,36 @@ static lv_obj_t *panel(lv_obj_t *box) {
   return p;
 }
 
+// Repaint MHz / RSSI / bar / guess for the selected band (encoder edit callback).
+static void freq_paint(int idx) {
+  if (idx < 0 || idx >= FREQ_N) return;
+  float f = FREQ_PRESETS[idx];
+  int rssi = cc1101_present() ? cc1101_rssi_at(f) : -70;   // demo RSSI w/o radio
+  if (g_freq_mhz)   lv_label_set_text_fmt(g_freq_mhz, "%.2f", f);
+  if (g_freq_sub)   lv_label_set_text_fmt(g_freq_sub, "MHz  -  %d dBm", rssi);
+  if (g_freq_bar)   lv_bar_set_value(g_freq_bar, sg_bar_pct(rssi), LV_ANIM_OFF);
+  if (g_freq_guess) lv_label_set_text(g_freq_guess, sg_guess(f));
+}
+
 static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
-  // Preset ISM spots covering the common sub-GHz remote/sensor bands.
-  static const float FREQS[] = {300.0f, 315.0f, 390.0f, 433.92f, 868.0f, 915.0f};
-  const int N = sizeof(FREQS) / sizeof(FREQS[0]);
-
+  if (g_freq_idx >= FREQ_N) g_freq_idx = 3;
   bool live = cc1101_present();
-  float peak_mhz = 433.92f;   // demo fallback when no radio is attached
-  int   peak_rssi = -42;
-  if (live) {
-    int rssi[N];
-    int bi = cc1101_sweep(FREQS, N, rssi);
-    if (bi >= 0) { peak_mhz = FREQS[bi]; peak_rssi = rssi[bi]; }
-  }
-
   lv_obj_t *p = panel(box);
-  char mhz[16]; snprintf(mhz, sizeof mhz, "%.2f", peak_mhz);
-  make_label(p, mhz, &lv_font_montserrat_28, C_GREEN);
-  char sub[40]; snprintf(sub, sizeof sub, "MHz  -  %d dBm", peak_rssi);
-  make_label(p, sub, &lv_font_unscii_8, C_SUB);
-
-  lv_obj_t *bar = lv_bar_create(p);
-  lv_obj_set_size(bar, lv_pct(100), 10);
-  lv_obj_set_style_bg_color(bar, lv_color_hex(C_LINE), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(bar, lv_color_hex(C_GREEN), LV_PART_INDICATOR);
-  lv_bar_set_value(bar, sg_bar_pct(peak_rssi), LV_ANIM_OFF);
-
-  make_label(p, sg_guess(peak_mhz), &lv_font_montserrat_16, C_TXT);
-  make_label(p, live ? "strongest signal in range" : "demo - CC1101 not detected",
+  g_freq_mhz = make_label(p, "", &lv_font_montserrat_28, C_GREEN);
+  g_freq_sub = make_label(p, "", &lv_font_unscii_8, C_SUB);
+  g_freq_bar = lv_bar_create(p);
+  lv_obj_set_size(g_freq_bar, lv_pct(100), 10);
+  lv_obj_set_style_bg_color(g_freq_bar, lv_color_hex(C_LINE), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(g_freq_bar, lv_color_hex(C_GREEN), LV_PART_INDICATOR);
+  g_freq_guess = make_label(p, "", &lv_font_montserrat_16, C_TXT);
+  make_label(p, live ? "rotate to tune the band" : "demo - CC1101 not detected",
              &lv_font_montserrat_14, live ? C_GREEN_SFT : C_AMBER);
-  make_label(box, "rotate = sweep    click = lock", &lv_font_unscii_8, C_MUTE);
+  make_label(box, "rotate = band    click = lock", &lv_font_unscii_8, C_MUTE);
+  freq_paint(g_freq_idx);
+  // Live-select: encoder cycles the preset band and re-measures in place.
+  g_edit_val = &g_freq_idx;
+  g_edit_min = 0; g_edit_max = FREQ_N - 1; g_edit_step = 1;
+  g_edit_cb = freq_paint;
 }
 
 static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
