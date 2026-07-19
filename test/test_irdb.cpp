@@ -13,6 +13,9 @@ int main() {
   const IrBrand *l = ir_find_brand("LG");
   assert(l && l->proto == IRP_NEC && l->power == 0x20DF10EF);
 
+  const IrBrand *so = ir_find_brand("Sony");
+  assert(so && so->proto == IRP_SONY && so->power == 0x00000A90 && so->bits == 12);
+
   // Index access + bounds.
   assert(ir_brand_at(0) == s || strcmp(ir_brand_at(0)->name, "Samsung") == 0);
   assert(ir_brand_at(-1) == nullptr);

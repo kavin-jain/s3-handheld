@@ -13,6 +13,8 @@ static_assert((int)GREE       == 24, "ac_db.h out of sync (GREE)");
 static_assert((int)HITACHI_AC == 40, "ac_db.h out of sync (HITACHI_AC)");
 static_assert((int)LG2        == 51, "ac_db.h out of sync (LG2)");
 static_assert((int)VOLTAS     == 90, "ac_db.h out of sync (VOLTAS)");
+static_assert((int)SONY       == 4,  "irdb.h out of sync (SONY)");
+static_assert((int)SAMSUNG    == 7,  "irdb.h out of sync (SAMSUNG)");
 
 // Adafruit 5639 emitter has its own FET — GPIO47 drives Signal directly.
 static IRsend irsend(PIN_IR_TX);

@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum { IRP_NEC = 3, IRP_SAMSUNG = 7 };
+enum { IRP_NEC = 3, IRP_SONY = 4, IRP_SAMSUNG = 7 };
 
 struct IrBrand {
   const char *name;
@@ -20,6 +20,7 @@ struct IrBrand {
 static const IrBrand IR_BRANDS[] = {
   {"Samsung", IRP_SAMSUNG, 0xE0E040BF, 0xE0E0E01F, 0xE0E0D02F, 32},
   {"LG",      IRP_NEC,     0x20DF10EF, 0x20DF40BF, 0x20DFC03F, 32},
+  {"Sony",    IRP_SONY,    0x00000A90, 0, 0, 12},  // SIRC-12 power (vol codes unverified)
 };
 static const int IR_BRAND_COUNT = sizeof(IR_BRANDS) / sizeof(IR_BRANDS[0]);
 
