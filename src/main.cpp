@@ -1157,17 +1157,30 @@ static void tool_fwdump(lv_obj_t *box) {         // Tools > Firmware dump
   make_label(box, "clip onto SPI flash - read = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
+static int       g_gpio_pin = 5;                 // live GPIO selector state
+static lv_obj_t *g_gpio_lbl = nullptr;
+
+static void gpio_paint(int pin) {
+  if (!g_gpio_lbl) return;
+  bool ok = gpio_usable(pin);
+  lv_label_set_text_fmt(g_gpio_lbl, "GPIO %d  -  %s", pin,
+                        ok ? "safe to drive" : "RESERVED");
+  lv_obj_set_style_text_color(g_gpio_lbl, lv_color_hex(ok ? C_TXT : C_RED), 0);
+}
+
 static void tool_gpio(lv_obj_t *box) {           // Tools > GPIO play
   lv_obj_t *p = panel(box);
-  int pin = 5;                                   // demo pin (usable)
   make_label(p, "GPIO PLAY", &lv_font_unscii_8, C_GREEN);
-  char h[40]; snprintf(h, sizeof h, "GPIO %d  -  %s", pin,
-                       gpio_usable(pin) ? "safe to drive" : "RESERVED");
-  make_label(p, h, &lv_font_montserrat_20, gpio_usable(pin) ? C_TXT : C_RED);
+  g_gpio_lbl = make_label(p, "", &lv_font_montserrat_20, C_TXT);
   make_label(p, "toggle HIGH/LOW, read state", &lv_font_montserrat_14, C_SUB);
   make_label(p, "flash/PSRAM pins 26-37 locked out", &lv_font_montserrat_14, C_AMBER);
   make_label(box, "rotate = pin   click = toggle (bring-up)",
              &lv_font_unscii_8, C_MUTE);
+  gpio_paint(g_gpio_pin);
+  // Live-select: rotary walks GPIO 0..48, colouring reserved pins red.
+  g_edit_val = &g_gpio_pin;
+  g_edit_min = 0; g_edit_max = 48; g_edit_step = 1;
+  g_edit_cb = gpio_paint;
 }
 
 static void tool_buspirate(lv_obj_t *box) {      // Tools > Bus Pirate
