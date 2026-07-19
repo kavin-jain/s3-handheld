@@ -1,0 +1,26 @@
+Handheld firmware — third-party notices
+========================================
+
+This project is licensed GPL-3.0 (see LICENSE). It links the following libraries,
+pulled as external dependencies via platformio.ini (not vendored into this tree):
+
+  lvgl/lvgl                         MIT
+  bodmer/TFT_eSPI                   FreeBSD/MIT
+  nrf24/RF24                        GPL-2.0-or-later
+  LSatan/SmartRC-CC1101-Driver-Lib  GPL-3.0
+  adafruit/Adafruit PN532           BSD
+  adafruit/Adafruit BusIO           MIT
+  adafruit/Adafruit MPU6050         BSD
+  adafruit/Adafruit MCP23017        BSD
+  adafruit/Adafruit MAX1704X        BSD
+  adafruit/Adafruit NeoPixel        LGPL-3.0
+  mikalhart/TinyGPSPlus             LGPL-2.1
+  crankyoldgit/IRremoteESP8266      LGPL-2.1
+
+Reference-only (NOT copied into this repository):
+  Hiktron/Hizmos   — no declared license (all rights reserved); read for understanding only.
+  pr3y/Bruce       — AGPL-3.0; read for understanding only. Original code written here instead.
+
+Bundled data (assets/, gitignored, curated onto device SD at build time):
+  Lucaslhm/Flipper-IRDB            IR remote database
+  mf_classic_dict (aggregated)     Mifare Classic key dictionary
