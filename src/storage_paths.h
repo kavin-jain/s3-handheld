@@ -30,6 +30,24 @@ static inline const char *sp_prefix(int k) {
   }
 }
 
+// Extract the sequence number from a bare filename ("nfc_0007.nfc") for kind k.
+// Returns the number, or -1 if the name isn't "<prefix>_<digits>.<ext>" for k.
+// Lets the hardware scan a directory ONCE for the max seq instead of probing
+// every candidate path — O(entries) rather than O(10000) stat calls per save.
+static inline int sp_parse_seq(const char *fname, int k) {
+  if (!fname || k < 0 || k >= SAVE_KIND_N) return -1;
+  const char *pfx = sp_prefix(k);
+  size_t i = 0;
+  for (; pfx[i]; i++) if (fname[i] != pfx[i]) return -1;   // prefix must match
+  if (fname[i] != '_') return -1;
+  const char *d = fname + i + 1;
+  if (d[0] < '0' || d[0] > '9') return -1;                 // need >=1 digit
+  int val = 0, c = 0;
+  while (d[c] >= '0' && d[c] <= '9') { val = val * 10 + (d[c] - '0'); c++; }
+  if (d[c] != '.') return -1;                              // digits then extension
+  return val;
+}
+
 // Build "/nfc/nfc_0007.nfc" into out. Returns chars written (excl NUL), or 0 on
 // bad args / overflow (and NUL-terminates out when it can).
 // ponytail: seq wraps at 10000 per kind — plenty; bump the width if you ever hoard more.

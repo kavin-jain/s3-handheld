@@ -34,19 +34,33 @@ bool storage_ready() { return s_ready; }
 uint32_t storage_total_mb() { return s_ready ? (uint32_t)(SD.cardSize() >> 20) : 0; }
 uint32_t storage_used_mb()  { return s_ready ? (uint32_t)(SD.usedBytes() >> 20) : 0; }
 
+// Scan a kind's folder ONCE, return the next free sequence (max existing + 1),
+// using the host-tested sp_parse_seq. Beats probing SD.exists() up to 10000×.
+static uint32_t next_seq(int kind) {
+  File dir = SD.open(sp_dir(kind));
+  if (!dir) return 0;
+  int hi = -1;
+  for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
+    const char *name = e.name();
+    const char *base = name;                 // some cores return a full path
+    for (const char *p = name; *p; p++) if (*p == '/') base = p + 1;
+    int s = sp_parse_seq(base, kind);
+    if (s > hi) hi = s;
+    e.close();
+  }
+  dir.close();
+  return (uint32_t)(hi + 1);
+}
+
 const char *storage_save(int kind, const char *ext, const uint8_t *data, size_t len) {
   static char path[48];
   if (!s_ready || kind < 0 || kind >= SAVE_KIND_N || !ext) return "";
-  // First unused slot for this kind (bounded scan).
-  for (uint32_t seq = 0; seq < 10000; seq++) {
-    if (!sp_make_path(path, sizeof path, kind, ext, seq)) return "";
-    if (!SD.exists(path)) {
-      File f = SD.open(path, FILE_WRITE);
-      if (!f) return "";
-      if (data && len) f.write(data, len);
-      f.close();
-      return path;
-    }
-  }
-  return "";  // 10000 slots full for this kind
+  uint32_t seq = next_seq(kind);
+  if (seq >= 10000) return "";               // this kind's slots are full
+  if (!sp_make_path(path, sizeof path, kind, ext, seq)) return "";
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) return "";
+  if (data && len) f.write(data, len);
+  f.close();
+  return path;
 }
