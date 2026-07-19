@@ -41,7 +41,35 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 
 ## NRF24 (2×NRF24, SPI-B) — add 10 µF caps first
 - ☐ Band scanner shows 2.4 GHz activity.
-- ☐ Mousejack detects a vulnerable dongle.
+- ☐ Mousejack detects a vulnerable dongle; injected 'a' frame moves a cursor.
+- ☐ Keyboard sniff decodes real keystrokes from an unencrypted 2.4 GHz kbd.
+
+## Sub-GHz — extras
+- ☐ Capture&replay decodes an RCSwitch fob (protocol auto-detected) and re-sends it.
+- ☐ wM-Bus: CC1101 @ 868.95 T/C-mode receives a meter frame; manuf/medium/CRC parse.
+
+## NFC — extras
+- ☐ Amiibo: PN532 dumps 540 B NTAG215; figure-id + BCC validate; write to blank NTAG215.
+- ☐ iButton: 1-Wire read of a Dallas key; CRC8 validates.
+
+## Counter-surveillance ("Am I safe?")
+- ☐ Hidden-camera / audio-bug sweep flags a live transmitter in a covert band.
+- ☐ Skimmer detector flags a planted HC-05 near a reader.
+- ☐ Deauth detector counts frames during a test deauth.
+- ☐ Drone spotter decodes a real OpenDroneID beacon (operator id + GPS).
+
+## WiFi — extras
+- ☐ Handshake: capture M1-M4 to a .pcap on SD; hashcat cracks a known PSK.
+- ☐ Karma: phone auto-associates to a probed SSID. Wardrive appends WiGLE rows + GPS.
+
+## Tools / Bench
+- ☐ Bus Pirate I2C scan names the board's own chips (0x20/0x24/0x36/0x68).
+- ☐ Firmware dump: JEDEC ID reads; full chip dumps to dump.bin on SD.
+- ☐ GPIO play toggles a usable pin; refuses reserved 26-37.
+
+## Comms / Me
+- ☐ ESP-NOW mesh exchanges a message with a second unit.
+- ☐ Phone BLE bridge feeds usage / calendar (iCal) / tasks to the device.
 
 ## Storage (onboard SD, SPI-A, CS GPIO9)
 - ☐ SD mounts; captures write to /subghz /nfc /ir /wifi and reload.
