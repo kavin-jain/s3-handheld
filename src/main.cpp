@@ -46,6 +46,7 @@
 #include "skimmer.h"
 #include "audiobug.h"
 #include "ssdp.h"
+#include "hackscreen.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -861,6 +862,17 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_hackscreen(lv_obj_t *box) {     // Pranks > Hacker screen
+  lv_obj_t *p = panel(box);
+  make_label(p, "ACCESS GRANTED", &lv_font_unscii_8, C_GREEN);
+  uint32_t s = 0xC0FFEE;                          // static frames; animate = enhancement
+  for (int i = 0; i < 3; i++) {
+    char line[25]; hack_line(&s, line, 24);
+    make_label(p, line, &lv_font_unscii_8, C_GREEN_SFT);
+  }
+  make_label(box, "fake movie hack - just for show", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_castcrash(lv_obj_t *box) {      // Pranks > Cast crasher
   lv_obj_t *p = panel(box);
   const char *resp =
@@ -1155,6 +1167,7 @@ static void build_tool(int c, int i) {
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
+  else if (c == 9 && i == 2) tool_hackscreen(box);    // Pranks > Hacker screen
   else if (c == 9 && i == 4) tool_castcrash(box);     // Pranks > Cast crasher
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
