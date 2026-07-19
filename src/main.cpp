@@ -57,6 +57,7 @@
 #include "wof.h"
 #include "usage_fmt.h"
 #include "df_logic.h"
+#include "csi_motion.h"
 #include "ui_edit.h"
 #include "espnow_mesh.h"
 
@@ -707,6 +708,21 @@ static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
   make_label(box, "click = rescan    red = open network", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_csi(lv_obj_t *box) {            // See invisible > See through wall
+  lv_obj_t *p = panel(box);
+  // Demo CSI window with someone moving -> high variance -> motion.
+  float win[8] = {40.f, 60.f, 42.f, 58.f, 39.f, 61.f, 41.f, 59.f};
+  float var = csi_variance(win, 8);
+  bool motion = csi_motion(win, 8, 5.0f);
+  make_label(p, "SEE THROUGH WALL", &lv_font_unscii_8, C_CYAN);
+  make_label(p, motion ? "MOTION DETECTED" : "room is still",
+             &lv_font_montserrat_20, motion ? C_RED : C_GREEN_SFT);
+  char h[40]; snprintf(h, sizeof h, "CSI variance %.0f", var);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "ambient WiFi channel-state sensing", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "esp_wifi CSI capture = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_df(lv_obj_t *box) {             // See invisible > Direction finder
   static int prev = -80;
   lv_obj_t *p = panel(box);
@@ -1257,6 +1273,7 @@ static void build_tool(int c, int i) {
   else if (c == 5 && i == 0) tool_mousejack(box);     // NRF24 / 2.4GHz > Mousejack
   else if (c == 5 && i == 1) tool_keysniff(box);      // NRF24 / 2.4GHz > Keyboard sniff
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
+  else if (c == 8 && i == 0) tool_csi(box);           // See invisible > See through wall
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
   else if (c == 10 && i == 0) tool_buspirate(box);    // Tools / Bench > Bus Pirate
