@@ -798,21 +798,30 @@ static void tool_df(lv_obj_t *box) {             // See invisible > Direction fi
   make_label(box, "warmer = closer to the transmitter", &lv_font_unscii_8, C_MUTE);
 }
 
+static int       g_nrf_ch = 6;                   // live 2.4 GHz channel inspector
+static lv_obj_t *g_nrf_lbl = nullptr;
+
+static void nrf_paint(int ch) {
+  if (!g_nrf_lbl) return;
+  bool busiest = nrf_present() && nrf_scanned() && ch == nrf_busiest_ch();
+  lv_label_set_text_fmt(g_nrf_lbl, "ch %d  -  %d MHz%s", ch, nrf_ch_mhz(ch),
+                        busiest ? "   <busiest>" : "");
+}
+
 static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanner
   lv_obj_t *p = panel(box);
-  if (!nrf_present()) {
-    make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, C_AMBER);
-    make_label(p, "demo - NRF24 not detected", &lv_font_montserrat_16, C_AMBER);
-    make_label(p, "busiest: ch 6 (2406 MHz)", &lv_font_montserrat_14, C_SUB);
-    return;
-  }
-  if (!nrf_scanned()) nrf_scan();
-  int bc = nrf_busiest_ch();
-  make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, C_GREEN);
-  char h[40]; snprintf(h, sizeof h, "busiest: ch %d (%d MHz)", bc, nrf_ch_mhz(bc));
-  make_label(p, h, &lv_font_montserrat_16, C_TXT);
-  make_label(p, "WiFi / BT / wireless keyboards live here", &lv_font_montserrat_14, C_SUB);
+  bool live = nrf_present();
+  if (live && !nrf_scanned()) nrf_scan();
+  make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, live ? C_GREEN : C_AMBER);
+  g_nrf_lbl = make_label(p, "", &lv_font_montserrat_16, C_TXT);
+  make_label(p, live ? "rotate to inspect a channel" : "demo - NRF24 not detected",
+             &lv_font_montserrat_14, live ? C_SUB : C_AMBER);
   make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
+  nrf_paint(g_nrf_ch);
+  // Live-select: rotary walks the 126 nRF channels, flags the busiest.
+  g_edit_val = &g_nrf_ch;
+  g_edit_min = 0; g_edit_max = 125; g_edit_step = 1;
+  g_edit_cb = nrf_paint;
 }
 
 static void tool_keysniff(lv_obj_t *box) {       // NRF24 / 2.4GHz > Keyboard sniff
