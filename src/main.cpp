@@ -31,6 +31,7 @@
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
+#include "usage_fmt.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -592,6 +593,23 @@ static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanne
   make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
+  lv_obj_t *p = panel(box);
+  int pct = usage_pct(62, 100);                  // demo — real data via phone bridge
+  make_label(p, "CLAUDE USAGE", &lv_font_unscii_8, C_GREEN);
+  char h[16]; snprintf(h, sizeof h, "%d%% of 5h", pct);
+  make_label(p, h, &lv_font_montserrat_28, pct > 85 ? C_RED : C_GREEN);
+  lv_obj_t *bar = lv_bar_create(p);
+  lv_obj_set_size(bar, lv_pct(100), 10);
+  lv_obj_set_style_bg_color(bar, lv_color_hex(C_LINE), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(bar, lv_color_hex(C_GREEN), LV_PART_INDICATOR);
+  lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+  char r[24]; fmt_hms(12180, r, sizeof r);
+  char line[40]; snprintf(line, sizeof line, "resets in %s", r);
+  make_label(p, line, &lv_font_montserrat_14, C_SUB);
+  make_label(box, "demo - real data via phone bridge", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
   // Info only — never auto-runs a payload on screen build (that would type into
   // whatever's plugged in). Running is a deliberate ACTION-key step (next iter).
@@ -762,6 +780,7 @@ static void build_tool(int c, int i) {
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
+  else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
