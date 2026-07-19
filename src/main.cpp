@@ -20,6 +20,7 @@
 #include "nfc_pn532.h"
 #include "nfc_keys.h"
 #include "ndef.h"
+#include "transit.h"
 #include "ir_remote.h"
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
@@ -713,6 +714,23 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_transit(lv_obj_t *box) {        // RFID/NFC > Transit card
+  lv_obj_t *p = panel(box);
+  make_label(p, "TRANSIT CARD", &lv_font_unscii_8, C_GREEN);
+  if (!nfc_present()) {
+    char r[16]; fmt_rupees(24550, r, sizeof r);
+    make_label(p, "demo - PN532 not detected", &lv_font_montserrat_16, C_AMBER);
+    char line[40]; snprintf(line, sizeof line, "Delhi Metro  %s", r);
+    make_label(p, line, &lv_font_montserrat_14, C_SUB);
+    return;
+  }
+  uint8_t uid[7], len = 0;
+  make_label(p, nfc_read_uid(uid, &len) ? "card present - reading balance..."
+                                        : "tap a metro card",
+             &lv_font_montserrat_16, C_TXT);
+  make_label(box, "balance block is card-specific (bring-up)", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_ndef(lv_obj_t *box) {           // RFID/NFC > Write NDEF tag
   lv_obj_t *p = panel(box);
   const char *url = "https://github.com/kavin-jain";
@@ -790,6 +808,7 @@ static void build_tool(int c, int i) {
   lv_obj_t *box = content_box(scr);
   if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
   else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
+  else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
   else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
