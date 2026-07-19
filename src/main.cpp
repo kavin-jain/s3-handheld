@@ -45,6 +45,7 @@
 #include "droneid.h"
 #include "skimmer.h"
 #include "audiobug.h"
+#include "ssdp.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -860,6 +861,23 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_castcrash(lv_obj_t *box) {      // Pranks > Cast crasher
+  lv_obj_t *p = panel(box);
+  const char *resp =
+    "HTTP/1.1 200 OK\r\n"
+    "LOCATION: http://192.168.1.42:8008/ssdp/device-desc.xml\r\n"
+    "ST: urn:dial-multiscreen-org:service:dial:1\r\n\r\n";
+  char loc[96], st[96];
+  ssdp_header(resp, "LOCATION", loc, sizeof loc);
+  ssdp_header(resp, "ST", st, sizeof st);
+  make_label(p, "CAST CRASHER", &lv_font_unscii_8, C_GREEN);
+  make_label(p, cast_kind(st), &lv_font_montserrat_20, C_TXT);
+  make_label(p, "192.168.1.42:8008", &lv_font_unscii_8, C_SUB);
+  make_label(p, "queue a video on nearby TVs (fun)",
+             &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "SSDP discovery + DIAL = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_audiobug(lv_obj_t *box) {       // Am I safe? > Audio bug sweep
   lv_obj_t *p = panel(box);
   float peak = 96.5f;                            // demo peak in the FM-mic band
@@ -1137,6 +1155,7 @@ static void build_tool(int c, int i) {
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
+  else if (c == 9 && i == 4) tool_castcrash(box);     // Pranks > Cast crasher
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
   else if (c == 3 && i == 2) tool_evilportal(box);    // WiFi > Evil Portal
