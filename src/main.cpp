@@ -26,6 +26,7 @@
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
 #include "ble_scan.h"
+#include "gatt_uuid.h"
 #include "badusb.h"
 #include "deauth_detect.h"
 #include "nrf24_radio.h"
@@ -796,6 +797,19 @@ static void tool_ndef(lv_obj_t *box) {           // RFID/NFC > Write NDEF tag
              &lv_font_montserrat_14, C_SUB);
 }
 
+static void tool_gatt(lv_obj_t *box) {           // Bluetooth > GATT explore
+  lv_obj_t *p = panel(box);
+  make_label(p, "GATT EXPLORE", &lv_font_unscii_8, C_GREEN);
+  // Demo: resolve a few common service UUIDs to names (real connect = bring-up).
+  static const uint16_t demo[] = {0x1800, 0x180A, 0x180F, 0x180D};
+  for (unsigned k = 0; k < sizeof(demo) / sizeof(demo[0]); k++) {
+    char line[48]; snprintf(line, sizeof line, "0x%04X  %s", demo[k],
+                            gatt_service_name(demo[k]));
+    make_label(p, line, &lv_font_montserrat_14, C_TXT);
+  }
+  make_label(box, "connect + enumerate a device = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_wof(lv_obj_t *box) {            // Bluetooth > Wall of Flipper
   lv_obj_t *p = panel(box);
   int n = ble_count();
@@ -867,6 +881,7 @@ static void build_tool(int c, int i) {
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
+  else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
