@@ -38,5 +38,38 @@ int main() {
 
   // Junk without a name/type is rejected.
   assert(!flipper_ir_parse("Filetype: IR signals file\nVersion: 1\n", &fp));
+
+  // Multi-record file (real Flipper layout: header + several button records).
+  const char *file =
+    "Filetype: IR signals file\n"
+    "Version: 1\n"
+    "#\n"
+    "name: Power\n"
+    "type: parsed\n"
+    "protocol: Samsung32\n"
+    "address: 07 00 00 00\n"
+    "command: E6 00 00 00\n"
+    "#\n"
+    "name: Vol_up\n"
+    "type: parsed\n"
+    "protocol: Samsung32\n"
+    "address: 07 00 00 00\n"
+    "command: 07 00 00 00\n"
+    "#\n"
+    "name: Mute\n"
+    "type: parsed\n"
+    "protocol: Samsung32\n"
+    "address: 07 00 00 00\n"
+    "command: 0F 00 00 00\n";
+  assert(flipper_ir_count(file) == 3);
+
+  // Each record parses independently — fields must not bleed across boundaries.
+  assert(flipper_ir_at(file, 0, &fp));
+  assert(strcmp(fp.name, "Power") == 0 && fp.cmd[0] == 0xE6);
+  assert(flipper_ir_at(file, 1, &fp));
+  assert(strcmp(fp.name, "Vol_up") == 0 && fp.cmd[0] == 0x07);
+  assert(flipper_ir_at(file, 2, &fp));
+  assert(strcmp(fp.name, "Mute") == 0 && fp.cmd[0] == 0x0F);
+  assert(!flipper_ir_at(file, 3, &fp));            // out of range
   return 0;
 }

@@ -74,6 +74,23 @@ bool storage_save_config(const char *text) {
   return true;
 }
 
+size_t storage_read_file(const char *path, char *out, size_t cap) {
+  if (!s_ready || !path || !out || cap == 0) return 0;
+  out[0] = 0;
+  if (!SD.exists(path)) return 0;
+  File f = SD.open(path, FILE_READ);
+  if (!f) return 0;
+  size_t o = 0;
+  while (f.available() && o < cap - 1) {
+    int c = f.read();
+    if (c < 0) break;
+    out[o++] = (char)c;
+  }
+  out[o] = 0;
+  f.close();
+  return o;
+}
+
 bool storage_load_config(char *out, size_t cap) {
   if (!s_ready || !out || cap == 0) return false;
   out[0] = 0;

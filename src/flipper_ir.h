@@ -47,15 +47,25 @@ static inline int flipper_type(const char *t) {
   return IRREC_NONE;
 }
 
-// Parse one record (a block of "key: value" lines) into fp. Returns true if it
-// found at least a name + a recognised type.
+// Is this line the "name:" field that starts a record?
+static inline bool flipper_is_name_line(const char *line) {
+  char v[8];
+  return ir_kv(line, "name", v, sizeof v);
+}
+
+// Parse one record starting at `record` into fp. Stops at the next "name:" line
+// so it's safe to call on the whole file positioned at a record start. Returns
+// true if it found at least a name + a recognised type.
 static inline bool flipper_ir_parse(const char *record, FlipperIr *fp) {
   if (!record || !fp) return false;
   memset(fp, 0, sizeof *fp);
   char v[48];
+  bool got_name = false;
   for (const char *line = record; line && *line; ) {
     if (ir_kv(line, "name", v, sizeof v)) {
+      if (got_name) break;                    // next record begins here — stop
       strncpy(fp->name, v, sizeof fp->name - 1);
+      got_name = true;
     } else if (ir_kv(line, "type", v, sizeof v)) {
       fp->type = flipper_type(v);
     } else if (ir_kv(line, "protocol", v, sizeof v)) {
@@ -69,4 +79,29 @@ static inline bool flipper_ir_parse(const char *record, FlipperIr *fp) {
     line = (*nl == '\n') ? nl + 1 : 0;
   }
   return fp->name[0] && fp->type != IRREC_NONE;
+}
+
+// Number of records (button entries) in a whole .ir file's text.
+static inline int flipper_ir_count(const char *text) {
+  int n = 0;
+  for (const char *line = text; line && *line; ) {
+    if (flipper_is_name_line(line)) n++;
+    const char *nl = line; while (*nl && *nl != '\n') nl++;
+    line = (*nl == '\n') ? nl + 1 : 0;
+  }
+  return n;
+}
+
+// Parse the idx-th record of a whole .ir file into fp. false if idx is out of range.
+static inline bool flipper_ir_at(const char *text, int idx, FlipperIr *fp) {
+  int seen = 0;
+  for (const char *line = text; line && *line; ) {
+    if (flipper_is_name_line(line)) {
+      if (seen == idx) return flipper_ir_parse(line, fp);
+      seen++;
+    }
+    const char *nl = line; while (*nl && *nl != '\n') nl++;
+    line = (*nl == '\n') ? nl + 1 : 0;
+  }
+  return false;
 }
