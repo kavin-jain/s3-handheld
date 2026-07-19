@@ -25,6 +25,8 @@
 #include "ble_scan.h"
 #include "badusb.h"
 #include "deauth_detect.h"
+#include "nrf24_radio.h"
+#include "nrf_band.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -569,6 +571,23 @@ static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
   make_label(box, "click = rescan    red = open network", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanner
+  lv_obj_t *p = panel(box);
+  if (!nrf_present()) {
+    make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, C_AMBER);
+    make_label(p, "demo - NRF24 not detected", &lv_font_montserrat_16, C_AMBER);
+    make_label(p, "busiest: ch 6 (2406 MHz)", &lv_font_montserrat_14, C_SUB);
+    return;
+  }
+  if (!nrf_scanned()) nrf_scan();
+  int bc = nrf_busiest_ch();
+  make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, C_GREEN);
+  char h[40]; snprintf(h, sizeof h, "busiest: ch %d (%d MHz)", bc, nrf_ch_mhz(bc));
+  make_label(p, h, &lv_font_montserrat_16, C_TXT);
+  make_label(p, "WiFi / BT / wireless keyboards live here", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
   // Info only — never auto-runs a payload on screen build (that would type into
   // whatever's plugged in). Running is a deliberate ACTION-key step (next iter).
@@ -671,6 +690,7 @@ static void build_tool(int c, int i) {
   else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
+  else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
