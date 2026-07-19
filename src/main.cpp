@@ -27,6 +27,7 @@
 #include "deauth_detect.h"
 #include "nrf24_radio.h"
 #include "nrf_band.h"
+#include "camera_detect.h"
 
 // ---------------------------------------------------------------- power knobs
 #define DIM_AFTER_MS     20000    // active -> dim
@@ -631,6 +632,25 @@ static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
   make_label(box, "click = rescan    cyan = tracker", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_camera(lv_obj_t *box) {         // Am I safe? > Hidden camera
+  lv_obj_t *p = panel(box);
+  make_label(p, "HIDDEN CAMERA", &lv_font_unscii_8, C_CYAN);
+  int n = wifi_count();
+  if (n <= 0) n = wifi_scan();
+  int cams = 0;
+  for (int i = 0; i < n; i++) {
+    const char *b = camera_ssid_brand(wifi_ssid(i));
+    if (!b) continue;
+    cams++;
+    char line[64]; snprintf(line, sizeof line, "%s  (%s)", wifi_ssid(i), b);
+    make_label(p, line, &lv_font_montserrat_14, C_AMBER);
+  }
+  if (cams == 0)
+    make_label(p, n > 0 ? "no camera-like WiFi APs" : "scanning...",
+               &lv_font_montserrat_16, C_GREEN_SFT);
+  make_label(box, "WiFi-name heuristic - OUI check next", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   if (!deauth_active()) deauth_begin();
   lv_obj_t *p = panel(box);
@@ -692,6 +712,7 @@ static void build_tool(int c, int i) {
   else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
+  else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
   else                       tool_generic(box, t);
