@@ -47,6 +47,7 @@
 #include "audiobug.h"
 #include "ssdp.h"
 #include "hackscreen.h"
+#include "hid_keymap.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -737,6 +738,23 @@ static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanne
   make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_keysniff(lv_obj_t *box) {       // NRF24 / 2.4GHz > Keyboard sniff
+  lv_obj_t *p = panel(box);
+  // Demo: decode a sniffed "Hello" HID report stream to text.
+  struct { uint8_t mod, key; } rpt[] = {
+    {0x02,0x0B},{0x00,0x08},{0x00,0x0F},{0x00,0x0F},{0x00,0x12}};
+  char txt[8]; int n = 0;
+  for (auto &r : rpt) { char c = hid_to_ascii(r.key, hid_shift(r.mod)); if (c) txt[n++] = c; }
+  txt[n] = 0;
+  make_label(p, "KEYBOARD SNIFF", &lv_font_unscii_8, C_AMBER);
+  make_label(p, "log 2.4GHz keystrokes", &lv_font_montserrat_16, C_TXT);
+  char h[32]; snprintf(h, sizeof h, "captured: %s", txt);
+  make_label(p, h, &lv_font_montserrat_20, C_GREEN_SFT);
+  make_label(p, "unencrypted keyboards only", &lv_font_montserrat_14, C_AMBER);
+  make_label(box, "nRF24 ESB sniff = bring-up - own gear only",
+             &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_mousejack(lv_obj_t *box) {      // NRF24 / 2.4GHz > Mousejack
   lv_obj_t *p = panel(box);
   uint8_t f[UNIFYING_KBD_LEN];
@@ -1179,6 +1197,7 @@ static void build_tool(int c, int i) {
   else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
   else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
   else if (c == 5 && i == 0) tool_mousejack(box);     // NRF24 / 2.4GHz > Mousejack
+  else if (c == 5 && i == 1) tool_keysniff(box);      // NRF24 / 2.4GHz > Keyboard sniff
   else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
