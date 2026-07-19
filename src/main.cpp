@@ -35,6 +35,7 @@
 #include "ble_track.h"
 #include "gatt_uuid.h"
 #include "badusb.h"
+#include "hid_encode.h"
 #include "deauth_detect.h"
 #include "nrf24_radio.h"
 #include "nrf_band.h"
@@ -868,6 +869,21 @@ static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
   make_label(box, "only on machines you own", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_hidattack(lv_obj_t *box) {      // BadUSB / HID > HID attacks
+  // Info only — never types on screen build; firing is a deliberate ACTION step.
+  lv_obj_t *p = panel(box);
+  const char *demo = "whoami";                   // encodes to HID reports on run
+  bool sh; int ok = 0;
+  for (const char *c = demo; *c; c++) if (ascii_to_hid(*c, &sh)) ok++;
+  make_label(p, "HID ATTACKS", &lv_font_unscii_8, C_RED);
+  make_label(p, "type any string as a keyboard", &lv_font_montserrat_16, C_TXT);
+  char h[40]; snprintf(h, sizeof h, "\"%s\" -> %d HID keys", demo, ok);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "full ASCII incl. shifted symbols", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "only on machines you own - USB HID bring-up",
+             &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   // Info only — never blasts on screen build; firing is a deliberate ACTION step.
   lv_obj_t *p = panel(box);
@@ -1305,6 +1321,7 @@ static void build_tool(int c, int i) {
   else if (c == 8 && i == 0) tool_csi(box);           // See invisible > See through wall
   else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
   else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
+  else if (c == 6 && i == 1) tool_hidattack(box);     // BadUSB / HID > HID attacks
   else if (c == 10 && i == 0) tool_buspirate(box);    // Tools / Bench > Bus Pirate
   else if (c == 10 && i == 1) tool_fwdump(box);       // Tools / Bench > Firmware dump
   else if (c == 10 && i == 2) tool_gpio(box);         // Tools / Bench > GPIO play
