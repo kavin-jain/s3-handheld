@@ -44,6 +44,7 @@
 #include "fwdump.h"
 #include "droneid.h"
 #include "skimmer.h"
+#include "audiobug.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -859,6 +860,19 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_audiobug(lv_obj_t *box) {       // Am I safe? > Audio bug sweep
+  lv_obj_t *p = panel(box);
+  float peak = 96.5f;                            // demo peak in the FM-mic band
+  const char *band = bug_band(peak);
+  make_label(p, "BUG SWEEP", &lv_font_unscii_8, C_CYAN);
+  char h[40]; snprintf(h, sizeof h, "peak %.1f MHz", peak);
+  make_label(p, h, &lv_font_montserrat_20, C_TXT);
+  make_label(p, band ? band : "no covert bands active",
+             &lv_font_montserrat_16, band ? C_RED : C_GREEN_SFT);
+  make_label(p, "FM / VHF / UHF / GSM / 2.4G", &lv_font_unscii_8, C_SUB);
+  make_label(box, "wideband RF sweep = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_skimmer(lv_obj_t *box) {        // Am I safe? > Skimmer detector
   lv_obj_t *p = panel(box);
   const char *seen = "HC-05";                    // demo: a flagged nearby module
@@ -1143,6 +1157,7 @@ static void build_tool(int c, int i) {
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
+  else if (c == 7 && i == 2) tool_audiobug(box);      // Am I safe? > Audio bug sweep
   else if (c == 7 && i == 4) tool_skimmer(box);       // Am I safe? > Skimmer detector
   else if (c == 7 && i == 5) tool_droneid(box);       // Am I safe? > Drone spotter
   else                       tool_generic(box, t);
