@@ -31,6 +31,7 @@
 #include "ibutton.h"
 #include "ir_remote.h"
 #include "irdb.h"
+#include "ac_db.h"
 #include "wifi_scan.h"
 #include "wifi_fmt.h"
 #include "ble_scan.h"
@@ -1012,30 +1013,38 @@ static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   make_label(box, "click = blast all (turns TVs off)", &lv_font_unscii_8, C_MUTE);
 }
 
-// Repaint the brand name + power code from an index (encoder edit callback).
+// Combined TV + A/C brand browser. Index 0..TV-1 = TV brands (irdb.h), the rest
+// = A/C brands (ac_db.h). Repaints name + code/protocol in place.
 static void ir_brand_edit_cb(int idx) {
-  const IrBrand *b = ir_brand_at(idx);
-  if (!b) return;
-  if (g_ir_name_lbl) lv_label_set_text(g_ir_name_lbl, b->name);
-  if (g_ir_code_lbl)
-    lv_label_set_text_fmt(g_ir_code_lbl, "POWER  0x%08lX", (unsigned long)b->power);
+  int tvN = ir_brand_count();
+  if (idx < tvN) {
+    const IrBrand *b = ir_brand_at(idx);
+    if (g_ir_name_lbl) lv_label_set_text_fmt(g_ir_name_lbl, "TV   %s", b->name);
+    if (g_ir_code_lbl)
+      lv_label_set_text_fmt(g_ir_code_lbl, "POWER  0x%08lX", (unsigned long)b->power);
+  } else {
+    const AcBrand *a = ac_brand_at(idx - tvN);
+    if (!a) return;
+    if (g_ir_name_lbl) lv_label_set_text_fmt(g_ir_name_lbl, "A/C  %s", a->name);
+    if (g_ir_code_lbl) lv_label_set_text_fmt(g_ir_code_lbl, "IRac protocol #%d", a->proto);
+  }
 }
 
 static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
   lv_obj_t *p = panel(box);
-  if (g_ir_brand >= ir_brand_count()) g_ir_brand = 0;
-  const IrBrand *b = ir_brand_at(g_ir_brand);
+  int total = ir_brand_count() + AC_BRAND_COUNT;
+  if (g_ir_brand < 0 || g_ir_brand >= total) g_ir_brand = 0;
   make_label(p, "UNIVERSAL REMOTE", &lv_font_unscii_8, C_GREEN);
-  g_ir_name_lbl = make_label(p, b->name, &lv_font_montserrat_20, C_TXT);
-  char h[40]; snprintf(h, sizeof h, "POWER  0x%08lX", (unsigned long)b->power);
-  g_ir_code_lbl = make_label(p, h, &lv_font_unscii_8, C_SUB);
-  char n[40]; snprintf(n, sizeof n, "%d brands in DB", ir_brand_count());
+  g_ir_name_lbl = make_label(p, "", &lv_font_montserrat_20, C_TXT);
+  g_ir_code_lbl = make_label(p, "", &lv_font_unscii_8, C_SUB);
+  char n[40]; snprintf(n, sizeof n, "%d TV + %d A/C brands", ir_brand_count(), AC_BRAND_COUNT);
   make_label(p, n, &lv_font_montserrat_14, C_GREEN_SFT);
   make_label(box, "rotate = brand   click = blast (bring-up)",
              &lv_font_unscii_8, C_MUTE);
-  // Live-select: encoder now cycles the brand index and repaints in place.
+  ir_brand_edit_cb(g_ir_brand);                  // paint the current selection
+  // Live-select across the whole TV+AC catalogue.
   g_edit_val = &g_ir_brand;
-  g_edit_min = 0; g_edit_max = ir_brand_count() - 1; g_edit_step = 1;
+  g_edit_min = 0; g_edit_max = total - 1; g_edit_step = 1;
   g_edit_cb = ir_brand_edit_cb;
 }
 

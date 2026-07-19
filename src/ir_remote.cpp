@@ -1,8 +1,18 @@
 #include "ir_remote.h"
+#include "ac_db.h"
 #include "pins.h"
 #include <Arduino.h>
 #include <IRsend.h>
 #include <IRrecv.h>
+
+// Guard: the AC-brand db (ac_db.h) hardcodes decode_type_t values so it can stay
+// pure/host-testable. Verify they still match the installed IRremoteESP8266 enum
+// — a library bump that renumbers protocols fails the build here, loudly.
+static_assert((int)DAIKIN     == 16, "ac_db.h out of sync with IRremoteESP8266 (DAIKIN)");
+static_assert((int)GREE       == 24, "ac_db.h out of sync (GREE)");
+static_assert((int)HITACHI_AC == 40, "ac_db.h out of sync (HITACHI_AC)");
+static_assert((int)LG2        == 51, "ac_db.h out of sync (LG2)");
+static_assert((int)VOLTAS     == 90, "ac_db.h out of sync (VOLTAS)");
 
 // Adafruit 5639 emitter has its own FET — GPIO47 drives Signal directly.
 static IRsend irsend(PIN_IR_TX);
