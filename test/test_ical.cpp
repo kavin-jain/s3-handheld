@@ -25,5 +25,20 @@ int main() {
   assert(strcmp(out, "Jul 19  14:30") == 0);
   ical_friendly("bogus", out, sizeof out);
   assert(out[0] == 0);
+
+  // ical_next_event: first valid line wins; ts + title split; skips junk.
+  char when[32], title[48];
+  const char *feed =
+    "not an event line\n"
+    "20260720T091500Z Team standup\n"
+    "20260101T000000 New year\n";
+  assert(ical_next_event(feed, when, sizeof when, title, sizeof title));
+  assert(strcmp(when, "Jul 20  09:15") == 0);
+  assert(strcmp(title, "Team standup") == 0);
+  // No valid line -> false, outputs cleared.
+  assert(!ical_next_event("garbage\nmore\n", when, sizeof when, title, sizeof title));
+  assert(when[0] == 0 && title[0] == 0);
+  assert(!ical_next_event("", when, sizeof when, title, sizeof title));
+  assert(!ical_next_event(nullptr, when, sizeof when, title, sizeof title));
   return 0;
 }

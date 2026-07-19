@@ -973,28 +973,53 @@ static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
 static void tool_tasks(lv_obj_t *box) {          // Me > Tasks
   lv_obj_t *p = panel(box);
   make_label(p, "TASKS", &lv_font_unscii_8, C_GREEN);
-  static const char *lines[] = {
-    "[ ] !1 Solder the BL mod", "[x] Flash firmware m2", "[ ] !3 Order antennas"};
-  for (const char *ln : lines) {
-    bool done; int prio; const char *text;
-    if (!task_parse(ln, &done, &prio, &text)) continue;
-    char row[48];
-    snprintf(row, sizeof row, "%s %s%s", done ? "[x]" : "[ ]",
-             prio ? (prio == 1 ? "! " : "  ") : "  ", text);
-    make_label(p, row, &lv_font_unscii_8, done ? C_MUTE : C_TXT);
+  // Phone bridge writes /me/tasks.txt to SD; fall back to a demo list if absent.
+  static char buf[1024];
+  static const char *demo =
+    "[ ] !1 Solder the BL mod\n[x] Flash firmware m2\n[ ] !3 Order antennas\n";
+  bool sd = storage_read_file("/me/tasks.txt", buf, sizeof buf) > 0;
+  const char *text = sd ? buf : demo;
+  int shown = 0;
+  for (const char *ln = text; ln && *ln && shown < 6; ) {
+    char line[64]; size_t n = 0;
+    while (ln[n] && ln[n] != '\n' && ln[n] != '\r' && n + 1 < sizeof line) {
+      line[n] = ln[n]; n++;
+    }
+    line[n] = 0;
+    bool done; int prio; const char *tx;
+    if (task_parse(line, &done, &prio, &tx)) {
+      char row[48];
+      snprintf(row, sizeof row, "%s %s%s", done ? "[x]" : "[ ]",
+               prio == 1 ? "! " : "  ", tx);
+      make_label(p, row, &lv_font_unscii_8, done ? C_MUTE : C_TXT);
+      shown++;
+    }
+    const char *nl = ln; while (*nl && *nl != '\n') nl++;
+    ln = (*nl == '\n') ? nl + 1 : 0;
   }
-  make_label(box, "synced from your phone = bring-up", &lv_font_unscii_8, C_MUTE);
+  make_label(box, sd ? "loaded /me/tasks.txt  (phone sync = bring-up)"
+                     : "demo - phone writes /me/tasks.txt (bring-up)",
+             &lv_font_unscii_8, C_MUTE);
 }
 
 static void tool_calendar(lv_obj_t *box) {       // Me > Calendar
   lv_obj_t *p = panel(box);
-  char when[32];
-  ical_friendly("20260719T143000Z", when, sizeof when);   // demo next event
   make_label(p, "CALENDAR", &lv_font_unscii_8, C_GREEN);
-  make_label(p, "Team sync", &lv_font_montserrat_20, C_TXT);
+  // Phone bridge writes /me/calendar.txt ("<iCal-dt> <title>" per line) to SD.
+  static char buf[512];
+  char when[32], title[48];
+  bool sd = storage_read_file("/me/calendar.txt", buf, sizeof buf) > 0 &&
+            ical_next_event(buf, when, sizeof when, title, sizeof title);
+  if (!sd) {                                     // demo fallback
+    ical_friendly("20260719T143000Z", when, sizeof when);
+    snprintf(title, sizeof title, "Team sync");
+  }
+  make_label(p, title, &lv_font_montserrat_20, C_TXT);
   make_label(p, when, &lv_font_montserrat_16, C_GREEN_SFT);
-  make_label(p, "next event from your phone", &lv_font_montserrat_14, C_SUB);
-  make_label(box, "BLE bridge to phone = bring-up", &lv_font_unscii_8, C_MUTE);
+  make_label(p, "next event", &lv_font_montserrat_14, C_SUB);
+  make_label(box, sd ? "loaded /me/calendar.txt  (BLE sync = bring-up)"
+                     : "demo - phone writes /me/calendar.txt (bring-up)",
+             &lv_font_unscii_8, C_MUTE);
 }
 
 static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
