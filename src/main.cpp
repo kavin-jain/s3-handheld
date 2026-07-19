@@ -48,6 +48,7 @@
 #include "ssdp.h"
 #include "hackscreen.h"
 #include "hid_keymap.h"
+#include "ical.h"
 #include "camera_detect.h"
 #include "tvbgone.h"
 #include "wof.h"
@@ -796,6 +797,17 @@ static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
   make_label(box, "demo - real data via phone bridge", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_calendar(lv_obj_t *box) {       // Me > Calendar
+  lv_obj_t *p = panel(box);
+  char when[32];
+  ical_friendly("20260719T143000Z", when, sizeof when);   // demo next event
+  make_label(p, "CALENDAR", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "Team sync", &lv_font_montserrat_20, C_TXT);
+  make_label(p, when, &lv_font_montserrat_16, C_GREEN_SFT);
+  make_label(p, "next event from your phone", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "BLE bridge to phone = bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
   // Info only — never auto-runs a payload on screen build (that would type into
   // whatever's plugged in). Running is a deliberate ACTION-key step (next iter).
@@ -1205,6 +1217,7 @@ static void build_tool(int c, int i) {
   else if (c == 10 && i == 1) tool_fwdump(box);       // Tools / Bench > Firmware dump
   else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
   else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
+  else if (c == 12 && i == 1) tool_calendar(box);     // Me > Calendar
   else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
   else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
   else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
