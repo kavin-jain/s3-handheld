@@ -37,6 +37,7 @@
 #include "gatt_uuid.h"
 #include "badusb.h"
 #include "hid_encode.h"
+#include "gags.h"
 #include "deauth_detect.h"
 #include "nrf24_radio.h"
 #include "nrf_band.h"
@@ -1004,6 +1005,19 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
 }
 
+static void tool_usbgag(lv_obj_t *box) {         // Pranks > USB gag
+  // Info only — never types on screen build; running is a deliberate ACTION step.
+  lv_obj_t *p = panel(box);
+  make_label(p, "USB GAG", &lv_font_unscii_8, C_RED);
+  make_label(p, "harmless keyboard prank", &lv_font_montserrat_16, C_TXT);
+  char h[40]; snprintf(h, sizeof h, "%d gags: %s, %s...", GAG_COUNT,
+                       GAGS[0].name, GAGS[1].name);
+  make_label(p, h, &lv_font_unscii_8, C_SUB);
+  make_label(p, "opens a page / locks screen - all safe",
+             &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(box, "own machines only - USB HID bring-up", &lv_font_unscii_8, C_MUTE);
+}
+
 static void tool_rickroll(lv_obj_t *box) {       // Pranks > Rickroll tag
   lv_obj_t *p = panel(box);
   const char *url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
@@ -1354,6 +1368,7 @@ static void build_tool(int c, int i) {
   else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
   else if (c == 9 && i == 1) tool_rickroll(box);      // Pranks > Rickroll tag
   else if (c == 9 && i == 2) tool_hackscreen(box);    // Pranks > Hacker screen
+  else if (c == 9 && i == 3) tool_usbgag(box);        // Pranks > USB gag
   else if (c == 9 && i == 4) tool_castcrash(box);     // Pranks > Cast crasher
   else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
   else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
