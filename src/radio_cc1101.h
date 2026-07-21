@@ -16,5 +16,9 @@ int     cc1101_sweep(const float *freqs, int n, int *rssi_out);
 // fills code/bits/proto_no (1-based) and returns true. Radio-dependent: bring-up.
 bool    subghz_capture(float mhz, uint32_t timeout_ms,
                        uint32_t *code, uint8_t *bits, int *proto_no);
+
+void    subghz_capture_begin(float mhz);
+bool    subghz_capture_poll(uint32_t *code, uint8_t *bits, int *proto_no);
+void    subghz_capture_end();
 // Re-transmit a previously captured code on mhz. Bring-up (async TX).
 bool    subghz_replay(float mhz, uint32_t code, uint8_t bits, int proto_no);

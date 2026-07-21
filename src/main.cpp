@@ -77,7 +77,7 @@
 #define SLEEP_AFTER_MS   35000    // active -> sleep (dim + this gap)
 #define DIM_DUTY         40       // backlight duty in DIM (0..255)
 #define ENABLE_LIGHT_SLEEP 1      // 0 while USB-debugging (light sleep drops CDC)
-#define ENC_STEPS_PER_DETENT 4    // EC11 quadrature transitions per click; tune
+#define ENC_STEPS_PER_DETENT 2    // EC11 quadrature transitions per click; tune
 
 // ---------------------------------------------------------------- palette (RGB)
 #define C_BG        0x05070a
@@ -97,6 +97,10 @@
 #define C_CYAN_BG   0x08222a
 
 // ---------------------------------------------------------------- display glue
+#include "bus_locks.h"
+#include "ui_anim.h"
+
+
 static TFT_eSPI tft = TFT_eSPI();
 static const uint16_t SCR_W = 320, SCR_H = 240;
 static lv_disp_draw_buf_t draw_buf;
@@ -104,99 +108,161 @@ static lv_color_t buf1[SCR_W * 40];
 
 static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *px) {
   uint32_t w = area->x2 - area->x1 + 1, h = area->y2 - area->y1 + 1;
+  if (spi_a_mutex) xSemaphoreTakeRecursive(spi_a_mutex, portMAX_DELAY);
   tft.startWrite();
   tft.setAddrWindow(area->x1, area->y1, w, h);
   tft.pushColors((uint16_t *)&px->full, w * h, true);
   tft.endWrite();
+  if (spi_a_mutex) xSemaphoreGiveRecursive(spi_a_mutex);
   lv_disp_flush_ready(drv);
 }
 
 // ---------------------------------------------------------------- feature data
 enum Kind : uint8_t { K_OK, K_SOON, K_ATK, K_DEF };   // badge flavor
 
-struct Tool { const char *code; const char *name; const char *sub; Kind kind; };
+struct Tool {
+  const char *code; const char *name; const char *sub; Kind kind;
+  void (*render)(lv_obj_t*);
+};
 struct Category { const char *icon; const char *name; const char *tag; const Tool *tools; uint8_t n; };
 
+// Forward declarations for tools
+static void tool_freq_finder(lv_obj_t*);
+static void tool_subghz_capture(lv_obj_t*);
+static void tool_ism(lv_obj_t*);
+static void tool_wmbus(lv_obj_t*);
+static void tool_nfc_read(lv_obj_t*);
+static void tool_mifare(lv_obj_t*);
+static void tool_emv(lv_obj_t*);
+static void tool_amiibo(lv_obj_t*);
+static void tool_transit(lv_obj_t*);
+static void tool_ndef(lv_obj_t*);
+static void tool_ibutton(lv_obj_t*);
+static void tool_ir_universal(lv_obj_t*);
+static void tool_ir_learn(lv_obj_t*);
+static void tool_tvbgone(lv_obj_t*);
+static void tool_wifi_scan(lv_obj_t*);
+static void tool_deauth_atk(lv_obj_t*);
+static void tool_evilportal(lv_obj_t*);
+static void tool_handshake(lv_obj_t*);
+static void tool_wardrive(lv_obj_t*);
+static void tool_karma(lv_obj_t*);
+static void tool_ble_scan(lv_obj_t*);
+static void tool_gatt(lv_obj_t*);
+static void tool_tracker_hunt(lv_obj_t*);
+static void tool_wip(lv_obj_t*);
+static void tool_mousejack(lv_obj_t*);
+static void tool_kbdsniff(lv_obj_t*);
+static void tool_bandscan(lv_obj_t*);
+static void tool_ducky(lv_obj_t*);
+static void tool_hid(lv_obj_t*);
+static void tool_camera(lv_obj_t*);
+static void tool_tracker(lv_obj_t*);
+static void tool_csi(lv_obj_t*);
+static void tool_dirfind(lv_obj_t*);
+static void tool_rickroll(lv_obj_t*);
+static void tool_hackscreen(lv_obj_t*);
+static void tool_usbgag(lv_obj_t*);
+static void tool_castcrash(lv_obj_t*);
+static void tool_buspirate(lv_obj_t*);
+static void tool_fwdump(lv_obj_t*);
+static void tool_gpio(lv_obj_t*);
+static void tool_espnow(lv_obj_t*);
+static void tool_usbhost(lv_obj_t*);
+static void tool_fido(lv_obj_t*);
+static void tool_df(lv_obj_t*);
+static void tool_nrf_scan(lv_obj_t*);
+static void tool_audiobug(lv_obj_t*);
+static void tool_skimmer(lv_obj_t*);
+static void tool_calendar(lv_obj_t*);
+static void tool_tasks(lv_obj_t*);
+static void tool_wof(lv_obj_t*);
+static void tool_keysniff(lv_obj_t*);
+static void tool_deauth(lv_obj_t*);
+static void tool_droneid(lv_obj_t*);
+static void tool_badusb(lv_obj_t*);
+static void tool_hidattack(lv_obj_t*);
+
 static const Tool T_SUBGHZ[] = {
-  {"SG",  "Frequency finder", "sweep the band, name the signal", K_OK},
-  {"CR",  "Capture & replay", "fixed-code gates & remotes",      K_ATK},
-  {"BF",  "Gate brute-force", "De Bruijn - your own gate",       K_ATK},
-  {"TS",  "Tesla charge port","315 MHz open",                    K_OK},
-  {"433", "ISM decoder",      "weather/doorbell/TPMS (rtl_433)", K_OK},
-  {"WMB", "wM-Bus meter",     "read utility meters, 868 MHz",    K_OK},
+  {"SG",  "Frequency finder", "sweep the band, name the signal", K_OK, tool_freq_finder},
+  {"CR",  "Capture & replay", "fixed-code gates & remotes",      K_ATK, tool_subghz_capture},
+  {"BF",  "Gate brute-force", "De Bruijn - your own gate",       K_ATK, nullptr},
+  {"TS",  "Tesla charge port","315 MHz open",                    K_OK, nullptr},
+  {"433", "ISM decoder",      "weather/doorbell/TPMS (rtl_433)", K_OK, tool_ism},
+  {"WMB", "wM-Bus meter",     "read utility meters, 868 MHz",    K_OK, tool_wmbus},
 };
 static const Tool T_NFC[] = {
-  {"NR",  "Read / clone",     "Mifare, NTAG & more",             K_OK},
-  {"MF",  "Mifare crack",     "dictionary keys",                 K_ATK},
-  {"EMV", "Bank card read",   "public data only",                K_OK},
-  {"TR",  "Transit card",     "metro balance & history",         K_OK},
-  {"ND",  "Write NDEF tag",   "URL / WiFi / vCard",              K_OK},
-  {"AM",  "Amiibo clone",     "to NTAG215",                      K_OK},
-  {"IB",  "iButton key",      "1-Wire Dallas",                   K_OK},
+  {"NR",  "Read / clone",     "Mifare, NTAG & more",             K_OK, tool_nfc_read},
+  {"MF",  "Mifare crack",     "dictionary keys",                 K_ATK, tool_mifare},
+  {"EMV", "Bank card read",   "public data only",                K_OK, tool_emv},
+  {"TR",  "Transit card",     "metro balance & history",         K_OK, tool_transit},
+  {"ND",  "Write NDEF tag",   "URL / WiFi / vCard",              K_OK, tool_ndef},
+  {"AM",  "Amiibo clone",     "to NTAG215",                      K_OK, tool_amiibo},
+  {"IB",  "iButton key",      "1-Wire Dallas",                   K_OK, tool_ibutton},
 };
 static const Tool T_IR[] = {
-  {"UR",  "Universal remote", "TV + A/C brand database",         K_OK},
-  {"LB",  "Learn & blast",    "capture any remote",              K_OK},
-  {"TVB", "TV-B-Gone",        "shut off any TV",                 K_OK},
+  {"UR",  "Universal remote", "TV + A/C brand database",         K_OK, tool_ir_universal},
+  {"LB",  "Learn & blast",    "capture any remote",              K_OK, tool_ir_learn},
+  {"TVB", "TV-B-Gone",        "shut off any TV",                 K_OK, tool_tvbgone},
 };
 static const Tool T_WIFI[] = {
-  {"SC",  "Scan / recon",     "who is here",                     K_OK},
-  {"DA",  "Deauth",           "kick a client",                   K_ATK},
-  {"EP",  "Evil Portal",      "captive login clone",             K_ATK},
-  {"HS",  "Handshake / PMKID","capture to SD",                   K_ATK},
-  {"WD",  "Wardrive",         "log nets + GPS to SD",            K_OK},
-  {"KM",  "Karma / MANA",     "auto-associate probes",           K_ATK},
+  {"SC",  "Scan / recon",     "who is here",                     K_OK, tool_wifi_scan},
+  {"DA",  "Deauth",           "kick a client",                   K_ATK, tool_deauth_atk},
+  {"EP",  "Evil Portal",      "captive login clone",             K_ATK, tool_evilportal},
+  {"HS",  "Handshake / PMKID","capture to SD",                   K_ATK, tool_handshake},
+  {"WD",  "Wardrive",         "log nets + GPS to SD",            K_OK, tool_wardrive},
+  {"KM",  "Karma / MANA",     "auto-associate probes",           K_ATK, tool_karma},
 };
 static const Tool T_BLE[] = {
-  {"BS",  "Scan / recon",     "devices around you",              K_OK},
-  {"GT",  "GATT explore",     "services & characteristics",      K_OK},
-  {"TK",  "Tracker hunt",     "AirTag / Tile near me",           K_DEF},
-  {"WF",  "Wall of Flipper",  "spot other hacking gear",         K_DEF},
+  {"BS",  "Scan / recon",     "devices around you",              K_OK, tool_ble_scan},
+  {"GT",  "GATT explore",     "services & characteristics",      K_OK, tool_gatt},
+  {"TK",  "Tracker hunt",     "AirTag / Tile near me",           K_DEF, tool_tracker_hunt},
+  {"WF",  "Wall of Flipper",  "spot other hacking gear",         K_DEF, tool_wof},
 };
 static const Tool T_NRF[] = {
-  {"MJ",  "Mousejack",        "wireless kbd/mouse inject",       K_ATK},
-  {"KS",  "Keyboard sniff",   "log 2.4 GHz keystrokes",          K_ATK},
-  {"BN",  "Band scanner",     "2.4 GHz activity map",            K_OK},
+  {"MJ",  "Mousejack",        "wireless kbd/mouse inject",       K_ATK, tool_mousejack},
+  {"KS",  "Keyboard sniff",   "log 2.4 GHz keystrokes",          K_ATK, tool_keysniff},
+  {"BN",  "Band scanner",     "2.4 GHz activity map",            K_OK, tool_nrf_scan},
 };
 static const Tool T_USB[] = {
-  {"DK",  "DuckyScript",      "run payload from SD",             K_ATK},
-  {"HID", "HID attacks",      "keystroke injection",             K_ATK},
+  {"DK",  "DuckyScript",      "run payload from SD",             K_ATK, tool_badusb},
+  {"HID", "HID attacks",      "keystroke injection",             K_ATK, tool_hidattack},
 };
 static const Tool T_SPY[] = {
-  {"HC",  "Hidden camera",    "wireless lens finder",            K_DEF},
-  {"ME",  "Tracker on me?",   "GPS/BLE bug sweep",               K_DEF},
-  {"AB",  "Audio bug sweep",  "RF listening devices",            K_DEF},
-  {"DD",  "Deauth detector",  "is someone jamming me?",          K_DEF},
-  {"SK",  "Skimmer detector", "rogue card readers",              K_DEF},
-  {"DR",  "Drone spotter",    "Remote-ID + pilot location",      K_DEF},
+  {"HC",  "Hidden camera",    "wireless lens finder",            K_DEF, tool_camera},
+  {"ME",  "Tracker on me?",   "GPS/BLE bug sweep",               K_DEF, tool_tracker},
+  {"AB",  "Audio bug sweep",  "RF listening devices",            K_DEF, tool_audiobug},
+  {"DD",  "Deauth detector",  "is someone jamming me?",          K_DEF, tool_deauth},
+  {"SK",  "Skimmer detector", "rogue card readers",              K_DEF, tool_skimmer},
+  {"DR",  "Drone spotter",    "Remote-ID + pilot location",      K_DEF, tool_droneid},
 };
 static const Tool T_SENSE[] = {
-  {"WW",  "See through wall",  "WiFi CSI motion & breathing",    K_OK},
-  {"DF",  "Direction finder",  "fox-hunt a signal",             K_OK},
+  {"WW",  "See through wall",  "WiFi CSI motion & breathing",    K_OK, tool_csi},
+  {"DF",  "Direction finder",  "fox-hunt a signal",             K_OK, tool_df},
 };
 static const Tool T_FUN[] = {
-  {"TVB", "TV-B-Gone",        "turn everything off",             K_OK},
-  {"RR",  "Rickroll tag",     "NFC that opens the song",         K_OK},
-  {"HK",  "Hacker screen",    "fake spy-movie hack",             K_OK},
-  {"GG",  "USB gag",          "harmless keyboard prank",         K_OK},
-  {"CST", "Cast crasher",     "poke nearby TVs / Rokus",         K_OK},
+  {"TVB", "TV-B-Gone",        "turn everything off",             K_OK, tool_tvbgone},
+  {"RR",  "Rickroll tag",     "NFC that opens the song",         K_OK, tool_rickroll},
+  {"HK",  "Hacker screen",    "fake spy-movie hack",             K_OK, tool_hackscreen},
+  {"GG",  "USB gag",          "harmless keyboard prank",         K_OK, tool_usbgag},
+  {"CST", "Cast crasher",     "poke nearby TVs / Rokus",         K_OK, tool_castcrash},
 };
 static const Tool T_TOOLS[] = {
-  {"BP",  "Bus Pirate",       "sniff I2C/SPI/UART/JTAG",         K_OK},
-  {"FD",  "Firmware dump",    "read & analyse flash",            K_OK},
-  {"GP",  "GPIO play",        "toggle & read pins",              K_OK},
+  {"BP",  "Bus Pirate",       "sniff I2C/SPI/UART/JTAG",         K_OK, tool_buspirate},
+  {"FD",  "Firmware dump",    "read & analyse flash",            K_OK, tool_fwdump},
+  {"GP",  "GPIO play",        "toggle & read pins",              K_OK, tool_gpio},
 };
 static const Tool T_COMMS[] = {
-  {"EN",  "ESP-NOW mesh",     "router-free messaging",           K_OK},
-  {"UH",  "USB host",         "read a flash drive",              K_OK},
-  {"MT",  "Meshtastic",       "needs LoRa add-on",               K_SOON},
+  {"EN",  "ESP-NOW mesh",     "router-free messaging",           K_OK, tool_espnow},
+  {"UH",  "USB host",         "read a flash drive",              K_OK, tool_usbhost},
+  {"MT",  "Meshtastic",       "needs LoRa add-on",               K_SOON, nullptr},
 };
 static const Tool T_ME[] = {
-  {"CL",  "Claude usage",     "5h & weekly meter",               K_SOON},
-  {"CAL", "Calendar",         "from your phone",                 K_SOON},
-  {"TSK", "Tasks",            "from your phone",                 K_SOON},
-  {"FID", "Security key",     "FIDO2 / U2F",                     K_OK},
-  {"LNK", "Phone + web",      "companion & dashboard",           K_SOON},
+  {"CL",  "Claude usage",     "5h & weekly meter",               K_SOON, nullptr},
+  {"CAL", "Calendar",         "from your phone",                 K_OK, tool_calendar},
+  {"TSK", "Tasks",            "from your phone",                 K_OK, tool_tasks},
+  {"FID", "Security key",     "FIDO2 / U2F",                     K_OK, nullptr},
+  {"LNK", "Phone + web",      "companion & dashboard",           K_SOON, nullptr},
 };
 
 #define CAT(icon, name, tag, arr) {icon, name, tag, arr, (uint8_t)(sizeof(arr)/sizeof(arr[0]))}
@@ -515,7 +581,12 @@ static void build_settings();
 static void build_edit_bright();
 static void build_edit_power();
 
+static lv_timer_t *g_tool_timer = nullptr;
+static void (*g_cleanup_cb)() = nullptr;
+
 static lv_obj_t *new_screen(const char *title) {
+  if (g_tool_timer) { lv_timer_del(g_tool_timer); g_tool_timer = nullptr; }
+  if (g_cleanup_cb) { g_cleanup_cb(); g_cleanup_cb = nullptr; }
   lv_group_remove_all_objs(g_group);          // detach old (about to be deleted)
   lv_obj_t *scr = lv_obj_create(NULL);
   lv_obj_add_style(scr, &st_screen, 0);
@@ -653,29 +724,57 @@ static void subghz_save_action() {
     lv_label_set_text(g_sub_status, (path && path[0]) ? path : "no SD card");
 }
 
+static lv_obj_t *g_sub_panel = nullptr;
+static lv_obj_t *g_sub_box = nullptr;
+
+static void subghz_cleanup() {
+  subghz_capture_end();
+}
+
+static void subghz_poll_cb(lv_timer_t *t) {
+  uint32_t code; uint8_t bits; int proto;
+  if (subghz_capture_poll(&code, &bits, &proto)) {
+    g_cleanup_cb = nullptr; // Clear cleanup so we don't call it again
+    subghz_capture_end();
+    lv_timer_del(g_tool_timer);
+    g_tool_timer = nullptr;
+    lv_obj_clean(g_sub_panel);
+    
+    g_sub_code = code; g_sub_bits = bits; g_sub_proto = proto;
+    char h[40]; rcs_fmt(code, bits, proto, h, sizeof h);
+    make_label(g_sub_panel, "CAPTURED", &lv_font_unscii_8, C_GREEN);
+    make_label(g_sub_panel, h, &lv_font_montserrat_20, C_TXT);
+    make_label(g_sub_panel, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
+    g_sub_status = make_label(g_sub_panel, "ACTION = save to /subghz", &lv_font_unscii_8, C_GREEN_SFT);
+    make_label(g_sub_box, "ACTION saves .sub -> SD    click = replay", &lv_font_unscii_8, C_MUTE);
+    g_action_cb = subghz_save_action;
+  }
+}
+
 static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
   lv_obj_t *p = panel(box);
+  g_sub_panel = p;
+  g_sub_box = box;
   bool live = cc1101_present();
-  uint32_t code = 0x0015F3; uint8_t bits = 24; int proto = 1;   // demo fallback
-  // ponytail: blocks up to 1.2 s while listening. Fine for bring-up; make it
-  // event-driven if the capture screen ever needs to stay responsive.
-  bool got = live && subghz_capture(433.92f, 1200, &code, &bits, &proto);
-  if (live && !got) {
-    make_label(p, "LISTENING 433.92", &lv_font_unscii_8, C_GREEN);
-    make_label(p, "press a fob near the antenna", &lv_font_montserrat_16, C_TXT);
-    make_label(box, "rotate = band    click = replay", &lv_font_unscii_8, C_MUTE);
+  
+  if (!live) {
+    make_label(p, "DEMO CAPTURE", &lv_font_unscii_8, C_AMBER);
+    make_label(p, "0x0015F3 (24-bit)", &lv_font_montserrat_20, C_TXT);
+    make_label(p, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
+    g_sub_status = make_label(p, "ACTION = save to /subghz", &lv_font_unscii_8, C_GREEN_SFT);
+    make_label(box, "ACTION saves .sub -> SD    click = replay", &lv_font_unscii_8, C_MUTE);
+    g_action_cb = subghz_save_action;
     return;
   }
-  g_sub_code = code; g_sub_bits = bits; g_sub_proto = proto;    // remember for save
-  char h[40]; rcs_fmt(code, bits, proto, h, sizeof h);
-  make_label(p, got ? "CAPTURED" : "DEMO CAPTURE", &lv_font_unscii_8,
-             got ? C_GREEN : C_AMBER);
-  make_label(p, h, &lv_font_montserrat_20, C_TXT);
-  make_label(p, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
-  g_sub_status = make_label(p, "ACTION = save to /subghz", &lv_font_unscii_8, C_GREEN_SFT);
-  make_label(box, "ACTION saves .sub -> SD    click = replay",
-             &lv_font_unscii_8, C_MUTE);
-  g_action_cb = subghz_save_action;              // ACTION button now saves this capture
+  
+  make_label(p, "LISTENING 433.92", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "press a fob near the antenna", &lv_font_montserrat_16, C_TXT);
+  ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
+  make_label(box, "rotate = band    click = replay", &lv_font_unscii_8, C_MUTE);
+  
+  g_cleanup_cb = subghz_cleanup;
+  subghz_capture_begin(433.92f);
+  g_tool_timer = lv_timer_create(subghz_poll_cb, 50, NULL);
 }
 
 static void tool_ism(lv_obj_t *box) {            // Sub-GHz > ISM decoder
@@ -769,6 +868,8 @@ static void tool_emv(lv_obj_t *box) {            // RFID/NFC > Bank card read
 // Last NFC UID (hex) + save status; ACTION writes it to /nfc.
 static char      g_nfc_uid[24] = "04:A2:1B:9C";
 static lv_obj_t *g_nfc_status = nullptr;
+static lv_obj_t *g_nfc_panel = nullptr;
+static lv_obj_t *g_nfc_box = nullptr;
 
 static void nfc_save_action() {
   size_t ul = 0; while (g_nfc_uid[ul]) ul++;
@@ -777,34 +878,42 @@ static void nfc_save_action() {
     lv_label_set_text(g_nfc_status, (path && path[0]) ? path : "no SD card");
 }
 
-static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
-  lv_obj_t *p = panel(box);
-  if (!nfc_present()) {
-    make_label(p, "NFC READ", &lv_font_unscii_8, C_AMBER);
-    make_label(p, "demo - PN532 not detected", &lv_font_montserrat_16, C_AMBER);
-    make_label(p, "UID 04:A2:1B:9C  -  Mifare Classic 1K", &lv_font_montserrat_14, C_SUB);
-    g_nfc_status = make_label(p, "ACTION = save to /nfc", &lv_font_unscii_8, C_GREEN_SFT);
-    make_label(box, "ACTION saves UID    click = crack keys", &lv_font_unscii_8, C_MUTE);
-    g_action_cb = nfc_save_action;               // demo UID is still saveable
-    return;
-  }
+static void nfc_poll_cb(lv_timer_t *t) {
   uint8_t uid[7], len = 0;
   if (nfc_read_uid(uid, &len)) {
+    lv_timer_del(g_tool_timer);
+    g_tool_timer = nullptr;
+    lv_obj_clean(g_nfc_panel);
     nfc_uid_hex(uid, len, g_nfc_uid, sizeof g_nfc_uid);
-    make_label(p, "CARD", &lv_font_unscii_8, C_GREEN);
-    make_label(p, g_nfc_uid, &lv_font_montserrat_20, C_TXT);
-    make_label(p, len == 4 ? "Mifare Classic / NTAG" : "7-byte UID card",
+    make_label(g_nfc_panel, "CARD", &lv_font_unscii_8, C_GREEN);
+    make_label(g_nfc_panel, g_nfc_uid, &lv_font_montserrat_20, C_TXT);
+    make_label(g_nfc_panel, len == 4 ? "Mifare Classic / NTAG" : "7-byte UID card",
                &lv_font_montserrat_14, C_SUB);
-    g_nfc_status = make_label(p, "ACTION = save to /nfc", &lv_font_montserrat_14, C_GREEN_SFT);
-    make_label(box, "ACTION saves UID    click = crack keys", &lv_font_unscii_8, C_MUTE);
+    g_nfc_status = make_label(g_nfc_panel, "ACTION = save to /nfc", &lv_font_montserrat_14, C_GREEN_SFT);
+    make_label(g_nfc_box, "ACTION saves UID    click = crack keys", &lv_font_unscii_8, C_MUTE);
     g_action_cb = nfc_save_action;
-  } else {
-    make_label(p, "PN532 READY", &lv_font_unscii_8, C_GREEN);
-    make_label(p, "tap a card to the antenna", &lv_font_montserrat_16, C_TXT);
   }
 }
 
+static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
+  lv_obj_t *p = panel(box);
+  g_nfc_panel = p;
+  g_nfc_box = box;
+  if (!nfc_present()) {
+    make_label(p, "NFC READ", &lv_font_unscii_8, C_AMBER);
+    make_label(p, "PN532 not detected", &lv_font_montserrat_16, C_RED);
+    make_label(p, "Check I2C wiring", &lv_font_montserrat_14, C_SUB);
+    return;
+  }
+  make_label(p, "PN532 READY", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "tap a card to the antenna", &lv_font_montserrat_16, C_TXT);
+  ui_anim_waves_create(p, 80, lv_color_hex(C_CYAN));
+  g_tool_timer = lv_timer_create(nfc_poll_cb, 200, NULL);
+}
+
 static lv_obj_t *g_wifi_status = nullptr;         // WiFi scan -> CSV save status
+static lv_obj_t *g_wifi_panel = nullptr;
+static lv_obj_t *g_wifi_box = nullptr;
 
 static void wifi_save_action() {
   char body[512];
@@ -817,27 +926,44 @@ static void wifi_save_action() {
     lv_label_set_text(g_wifi_status, (path && path[0]) ? path : "no SD card");
 }
 
-static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
-  lv_obj_t *p = panel(box);
-  int n = wifi_count();
-  if (n <= 0) n = wifi_scan();                   // first entry: one ~2 s scan, then cached
+static void wifi_poll_cb(lv_timer_t *t) {
+  int n = wifi_scan_complete();
+  if (n == -1) return; // Still scanning
+  
+  lv_timer_del(g_tool_timer);
+  g_tool_timer = nullptr;
+  lv_obj_clean(g_wifi_panel);
+  
   if (n <= 0) {
-    make_label(p, "WIFI SCAN", &lv_font_unscii_8, C_GREEN);
-    make_label(p, "no networks found", &lv_font_montserrat_16, C_SUB);
+    make_label(g_wifi_panel, "WIFI SCAN", &lv_font_unscii_8, C_GREEN);
+    make_label(g_wifi_panel, "no networks found", &lv_font_montserrat_16, C_SUB);
     return;
   }
   char h[24]; snprintf(h, sizeof h, "%d networks", n);
-  make_label(p, h, &lv_font_unscii_8, C_GREEN);
+  make_label(g_wifi_panel, h, &lv_font_unscii_8, C_GREEN);
   int show = n < 5 ? n : 5;
   for (int i = 0; i < show; i++) {
     int enc = wifi_enc(i);
     char line[72];
     snprintf(line, sizeof line, "%s  %s  %d dBm", wifi_ssid(i), wifi_enc_str(enc), wifi_rssi(i));
-    make_label(p, line, &lv_font_montserrat_14, wifi_is_open(enc) ? C_RED : C_TXT);
+    make_label(g_wifi_panel, line, &lv_font_montserrat_14, wifi_is_open(enc) ? C_RED : C_TXT);
   }
-  g_wifi_status = make_label(p, "ACTION = save list to /wifi", &lv_font_unscii_8, C_GREEN_SFT);
-  make_label(box, "ACTION saves CSV    click = rescan", &lv_font_unscii_8, C_MUTE);
+  g_wifi_status = make_label(g_wifi_panel, "ACTION = save list to /wifi", &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(g_wifi_box, "ACTION saves CSV    click = rescan", &lv_font_unscii_8, C_MUTE);
   g_action_cb = wifi_save_action;
+}
+
+static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
+  lv_obj_t *p = panel(box);
+  g_wifi_panel = p;
+  g_wifi_box = box;
+  
+  make_label(p, "WIFI SCAN", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "scanning 2.4GHz...", &lv_font_montserrat_16, C_TXT);
+  ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
+  
+  wifi_scan_async();
+  g_tool_timer = lv_timer_create(wifi_poll_cb, 200, NULL);
 }
 
 static void tool_csi(lv_obj_t *box) {            // See invisible > See through wall
@@ -1053,6 +1179,13 @@ static void tool_hidattack(lv_obj_t *box) {      // BadUSB / HID > HID attacks
              &lv_font_unscii_8, C_MUTE);
 }
 
+static lv_obj_t *g_tvb_status = nullptr;
+
+static void tvb_fire_action() {
+  tvbgone_fire_all(150);
+  if (g_tvb_status) lv_label_set_text(g_tvb_status, "blasted all codes");
+}
+
 static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   // Info only — never blasts on screen build; firing is a deliberate ACTION step.
   lv_obj_t *p = panel(box);
@@ -1060,7 +1193,8 @@ static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   char h[40]; snprintf(h, sizeof h, "%d TV power codes ready", tvb_count());
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
   make_label(p, "Samsung / LG / Sony / NEC / Philips", &lv_font_montserrat_14, C_SUB);
-  make_label(box, "click = blast all (turns TVs off)", &lv_font_unscii_8, C_MUTE);
+  g_tvb_status = make_label(box, "ACTION = blast all (turns TVs off)", &lv_font_unscii_8, C_MUTE);
+  g_action_cb = tvb_fire_action;
 }
 
 // Combined TV + A/C brand browser. Index 0..TV-1 = TV brands (irdb.h), the rest
@@ -1113,42 +1247,68 @@ static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
 
 // Last learned IR frame + save status; ACTION writes it to /ir.
 static uint8_t  g_irl_proto = 3;                 // NEC
-static uint32_t g_irl_value = 0x00000408;        // demo addr/cmd
+static uint64_t g_irl_value = 0x00000408;        // demo addr/cmd
 static uint16_t g_irl_bits = 32;
 static lv_obj_t *g_irl_status = nullptr;
+static lv_obj_t *g_irl_panel = nullptr;
 
 static void ir_save_action() {
   char body[80];
-  int n = snprintf(body, sizeof body, "protocol:%u\nbits:%u\nvalue:0x%08lX\n",
+  int n = snprintf(body, sizeof body, "protocol:%u\nbits:%u\nvalue:0x%08llX\n",
                    (unsigned)g_irl_proto, (unsigned)g_irl_bits,
-                   (unsigned long)g_irl_value);
+                   (unsigned long long)g_irl_value);
   const char *path = storage_save(SAVE_IR, "ir", (const uint8_t *)body, (size_t)n);
   if (g_irl_status)
     lv_label_set_text(g_irl_status, (path && path[0]) ? path : "no SD card");
 }
 
+static void ir_poll_cb(lv_timer_t *t) {
+  uint8_t proto; uint64_t value; uint16_t bits;
+  if (ir_learn(10, &proto, &value, &bits)) {
+    lv_timer_del(g_tool_timer);
+    g_tool_timer = nullptr;
+    lv_obj_clean(g_irl_panel);
+    g_irl_proto = proto; g_irl_value = value; g_irl_bits = bits;
+    make_label(g_irl_panel, "CAPTURED", &lv_font_unscii_8, C_GREEN);
+    char h[40]; snprintf(h, sizeof h, "0x%08llX", (unsigned long long)value);
+    make_label(g_irl_panel, h, &lv_font_montserrat_20, C_TXT);
+    char sub[40]; snprintf(sub, sizeof sub, "proto %u  %u bits", (unsigned)proto, (unsigned)bits);
+    make_label(g_irl_panel, sub, &lv_font_montserrat_14, C_GREEN_SFT);
+    g_irl_status = make_label(g_irl_panel, "ACTION = save to /ir", &lv_font_unscii_8, C_GREEN_SFT);
+    g_action_cb = ir_save_action;
+  }
+}
+
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   lv_obj_t *p = panel(box);
+  g_irl_panel = p;
   make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
   make_label(p, "TX GPIO47   RX GPIO48", &lv_font_unscii_8, C_SUB);
   make_label(p, "aim any remote and press a button", &lv_font_montserrat_16, C_TXT);
-  make_label(p, "last: NEC  addr 0x04  cmd 0x08  (demo)", &lv_font_montserrat_14, C_GREEN_SFT);
-  g_irl_status = make_label(p, "ACTION = save to /ir", &lv_font_unscii_8, C_GREEN_SFT);
+  ui_anim_radar_create(p, 60, lv_color_hex(C_GREEN_SFT));
   make_label(box, "ACTION saves .ir    click = blast", &lv_font_unscii_8, C_MUTE);
   g_action_cb = ir_save_action;
+  g_tool_timer = lv_timer_create(ir_poll_cb, 100, NULL);
 }
 
-static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
-  lv_obj_t *p = panel(box);
+static lv_obj_t *g_ble_panel = nullptr;
+static lv_obj_t *g_ble_box = nullptr;
+
+static void ble_poll_cb(lv_timer_t *t) {
+  if (!ble_scan_complete()) return;
+  
+  lv_timer_del(g_tool_timer);
+  g_tool_timer = nullptr;
+  lv_obj_clean(g_ble_panel);
+  
   int n = ble_count();
-  if (n <= 0) n = ble_scan(3);
   if (n <= 0) {
-    make_label(p, "BLE SCAN", &lv_font_unscii_8, C_GREEN);
-    make_label(p, "nothing advertising nearby", &lv_font_montserrat_16, C_SUB);
+    make_label(g_ble_panel, "BLE SCAN", &lv_font_unscii_8, C_GREEN);
+    make_label(g_ble_panel, "nothing advertising nearby", &lv_font_montserrat_16, C_SUB);
     return;
   }
   char h[24]; snprintf(h, sizeof h, "%d devices", n);
-  make_label(p, h, &lv_font_unscii_8, C_GREEN);
+  make_label(g_ble_panel, h, &lv_font_unscii_8, C_GREEN);
   int show = n < 5 ? n : 5;
   for (int i = 0; i < show; i++) {
     const char *nm = ble_name(i);
@@ -1156,27 +1316,59 @@ static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
     char line[72];
     snprintf(line, sizeof line, "%s  %d dBm%s", nm, ble_rssi(i),
              ble_is_tracker(i) ? "  [TRACKER]" : "");
-    make_label(p, line, &lv_font_montserrat_14, ble_is_tracker(i) ? C_CYAN : C_TXT);
+    make_label(g_ble_panel, line, &lv_font_montserrat_14, ble_is_tracker(i) ? C_CYAN : C_TXT);
   }
-  make_label(box, "click = rescan    cyan = tracker", &lv_font_unscii_8, C_MUTE);
+  make_label(g_ble_box, "click = rescan    cyan = tracker", &lv_font_unscii_8, C_MUTE);
 }
 
-static void tool_camera(lv_obj_t *box) {         // Am I safe? > Hidden camera
+static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
   lv_obj_t *p = panel(box);
-  make_label(p, "HIDDEN CAMERA", &lv_font_unscii_8, C_CYAN);
-  int n = wifi_count();
-  if (n <= 0) n = wifi_scan();
+  g_ble_panel = p;
+  g_ble_box = box;
+  
+  make_label(p, "BLE SCAN", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "scanning 3 seconds...", &lv_font_montserrat_16, C_TXT);
+  ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
+  
+  ble_scan_async(3);
+  g_tool_timer = lv_timer_create(ble_poll_cb, 200, NULL);
+}
+
+static lv_obj_t *g_camera_panel = nullptr;
+
+static void camera_poll_cb(lv_timer_t *t) {
+  int n = wifi_scan_complete();
+  if (n == -1) return;
+  
+  lv_timer_del(g_tool_timer);
+  g_tool_timer = nullptr;
+  lv_obj_clean(g_camera_panel);
+  
+  make_label(g_camera_panel, "HIDDEN CAMERA", &lv_font_unscii_8, C_CYAN);
   int cams = 0;
   for (int i = 0; i < n; i++) {
     const char *b = camera_ssid_brand(wifi_ssid(i));
     if (!b) continue;
     cams++;
     char line[64]; snprintf(line, sizeof line, "%s  (%s)", wifi_ssid(i), b);
-    make_label(p, line, &lv_font_montserrat_14, C_AMBER);
+    make_label(g_camera_panel, line, &lv_font_montserrat_14, C_AMBER);
   }
   if (cams == 0)
-    make_label(p, n > 0 ? "no camera-like WiFi APs" : "scanning...",
+    make_label(g_camera_panel, n > 0 ? "no camera-like WiFi APs" : "scan failed",
                &lv_font_montserrat_16, C_GREEN_SFT);
+}
+
+static void tool_camera(lv_obj_t *box) {         // Am I safe? > Hidden camera
+  lv_obj_t *p = panel(box);
+  g_camera_panel = p;
+  
+  make_label(p, "HIDDEN CAMERA", &lv_font_unscii_8, C_CYAN);
+  make_label(p, "scanning 2.4GHz...", &lv_font_montserrat_16, C_TXT);
+  ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
+  
+  wifi_scan_async();
+  g_tool_timer = lv_timer_create(camera_poll_cb, 200, NULL);
+  
   make_label(box, "WiFi-name heuristic - OUI check next", &lv_font_unscii_8, C_MUTE);
 }
 
@@ -1269,66 +1461,183 @@ static void tool_castcrash(lv_obj_t *box) {      // Pranks > Cast crasher
   make_label(box, "SSDP discovery + DIAL = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
-static void tool_audiobug(lv_obj_t *box) {       // Am I safe? > Audio bug sweep
-  lv_obj_t *p = panel(box);
-  float peak = 96.5f;                            // demo peak in the FM-mic band
+#include "esp_flash.h"
+
+static int s_bug_idx = 0;
+static const float s_bug_freqs[] = { 88.0, 92.5, 96.5, 102.1, 107.9, 144.0, 155.0, 168.0, 433.92, 868.0, 915.0 };
+static int s_bug_rssi[11];
+static lv_timer_t *s_active_tool_timer = nullptr;
+
+static void tool_timer_cleanup() {
+    if (s_active_tool_timer) {
+        lv_timer_del(s_active_tool_timer);
+        s_active_tool_timer = nullptr;
+    }
+}
+
+static void audiobug_timer_cb(lv_timer_t * t) {
+  lv_obj_t *box = (lv_obj_t *)t->user_data;
+  
+  if (s_bug_idx < 11) {
+     s_bug_rssi[s_bug_idx] = cc1101_rssi_at(s_bug_freqs[s_bug_idx]);
+     s_bug_idx++;
+     return;
+  }
+  
+  lv_timer_pause(t);
+  int max_idx = 0;
+  for (int i = 1; i < 11; i++) {
+     if (s_bug_rssi[i] > s_bug_rssi[max_idx]) max_idx = i;
+  }
+  float peak = s_bug_freqs[max_idx];
+  int peak_val = s_bug_rssi[max_idx];
   const char *band = bug_band(peak);
+  bool active = (peak_val > -75);
+  
+  lv_obj_clean(box);
+  lv_obj_t *p = panel(box);
   make_label(p, "BUG SWEEP", &lv_font_unscii_8, C_CYAN);
-  char h[40]; snprintf(h, sizeof h, "peak %.1f MHz", peak);
-  make_label(p, h, &lv_font_montserrat_20, C_TXT);
-  make_label(p, band ? band : "no covert bands active",
-             &lv_font_montserrat_16, band ? C_RED : C_GREEN_SFT);
+  if (active) {
+      char h[40]; snprintf(h, sizeof h, "peak %.1f MHz (%ddBm)", peak, peak_val);
+      make_label(p, h, &lv_font_montserrat_20, C_TXT);
+      make_label(p, band ? band : "UNKNOWN BAND", &lv_font_montserrat_16, C_RED);
+  } else {
+      make_label(p, "no covert bands active", &lv_font_montserrat_16, C_GREEN_SFT);
+  }
   make_label(p, "FM / VHF / UHF / GSM / 2.4G", &lv_font_unscii_8, C_SUB);
-  make_label(box, "wideband RF sweep = bring-up", &lv_font_unscii_8, C_MUTE);
+  make_label(box, "Press action to sweep again", &lv_font_unscii_8, C_MUTE);
 }
 
-static void tool_skimmer(lv_obj_t *box) {        // Am I safe? > Skimmer detector
+static void tool_audiobug(lv_obj_t *box) {
   lv_obj_t *p = panel(box);
-  const char *seen = "HC-05";                    // demo: a flagged nearby module
-  bool hit = is_skimmer_name(seen);
+  make_label(p, "BUG SWEEP", &lv_font_unscii_8, C_CYAN);
+  
+  if (!cc1101_present()) {
+      make_label(p, "CC1101 not detected", &lv_font_montserrat_16, C_RED);
+      return;
+  }
+  make_label(p, "Sweeping bands...", &lv_font_montserrat_16, C_TXT);
+  ui_anim_waves_create(p, 80, lv_color_hex(C_RED));
+  
+  s_bug_idx = 0;
+  s_active_tool_timer = lv_timer_create(audiobug_timer_cb, 50, box);
+  g_cleanup_cb = tool_timer_cleanup;
+}
+
+static void skimmer_timer_cb(lv_timer_t * t) {
+  lv_obj_t *box = (lv_obj_t *)t->user_data;
+  if (!ble_scan_complete()) return;
+  lv_timer_pause(t);
+  
+  int count = ble_count();
+  const char* suspect = NULL;
+  for (int i=0; i<count; i++) {
+     if (is_skimmer_name(ble_name(i))) {
+         suspect = ble_name(i);
+         break;
+     }
+  }
+  
+  lv_obj_clean(box);
+  lv_obj_t *p = panel(box);
   make_label(p, "SKIMMER DETECTOR", &lv_font_unscii_8, C_CYAN);
-  make_label(p, hit ? "SUSPECT MODULE NEARBY" : "no skimmer signatures",
-             &lv_font_montserrat_16, hit ? C_RED : C_GREEN_SFT);
-  char h[40]; snprintf(h, sizeof h, "BLE name: \"%s\"", seen);
-  make_label(p, h, &lv_font_unscii_8, C_SUB);
-  make_label(p, "generic BT modules used by skimmers",
-             &lv_font_montserrat_14, C_SUB);
-  make_label(box, "scan at pumps/ATMs - BLE scan bring-up", &lv_font_unscii_8, C_MUTE);
+  if (suspect) {
+      make_label(p, "SUSPECT MODULE NEARBY", &lv_font_montserrat_16, C_RED);
+      char h[40]; snprintf(h, sizeof h, "BLE name: \"%s\"", suspect);
+      make_label(p, h, &lv_font_unscii_8, C_SUB);
+  } else {
+      make_label(p, "no skimmer signatures", &lv_font_montserrat_16, C_GREEN_SFT);
+      char h[40]; snprintf(h, sizeof h, "Scanned %d devices", count);
+      make_label(p, h, &lv_font_unscii_8, C_SUB);
+  }
+  make_label(p, "generic BT modules used by skimmers", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "Press action to scan again", &lv_font_unscii_8, C_MUTE);
 }
 
-static void tool_droneid(lv_obj_t *box) {        // Am I safe? > Drone spotter
+static void tool_skimmer(lv_obj_t *box) {
   lv_obj_t *p = panel(box);
-  // Demo Remote-ID: Basic ID + a Location fix.
-  uint8_t basic[22] = {0x02, 0x10};
-  const char *uas = "1596F3A2C0D9K7X4";
-  for (int i = 0; uas[i]; i++) basic[2 + i] = (uint8_t)uas[i];
-  char id[21]; odid_basic_id(basic, id);
-  int32_t lat = 129716000, lon = 775946000;      // 12.9716, 77.5946
+  make_label(p, "SKIMMER DETECTOR", &lv_font_unscii_8, C_CYAN);
+  make_label(p, "Scanning BLE...", &lv_font_montserrat_16, C_TXT);
+  ui_anim_radar_create(p, 80, lv_color_hex(C_GREEN));
+  
+  ble_scan_async(3);
+  s_active_tool_timer = lv_timer_create(skimmer_timer_cb, 500, box);
+  g_cleanup_cb = tool_timer_cleanup;
+}
+
+static void droneid_timer_cb(lv_timer_t * t) {
+  lv_obj_t *box = (lv_obj_t *)t->user_data;
+  if (!ble_scan_complete()) return;
+  lv_timer_pause(t);
+  
+  int count = ble_count();
+  const char* suspect = NULL;
+  for (int i=0; i<count; i++) {
+     const char* n = ble_name(i);
+     if (ci_contains(n, "DJI") || ci_contains(n, "Drone") || ci_contains(n, "Mavic")) {
+         suspect = n;
+         break;
+     }
+  }
+  
+  lv_obj_clean(box);
+  lv_obj_t *p = panel(box);
   make_label(p, "DRONE SPOTTER", &lv_font_unscii_8, C_CYAN);
-  make_label(p, "Remote-ID broadcast nearby", &lv_font_montserrat_16, C_TXT);
-  char h[48]; snprintf(h, sizeof h, "ID %s", id);
-  make_label(p, h, &lv_font_unscii_8, C_SUB);
-  char loc[48]; snprintf(loc, sizeof loc, "pilot @ %.4f, %.4f",
-                         odid_coord(lat), odid_coord(lon));
-  make_label(p, loc, &lv_font_montserrat_14, C_GREEN_SFT);
-  make_label(box, "BLE/WiFi Remote-ID sniff = bring-up", &lv_font_unscii_8, C_MUTE);
+  if (suspect) {
+      make_label(p, "Drone broadcast nearby", &lv_font_montserrat_16, C_TXT);
+      char h[48]; snprintf(h, sizeof h, "ID %s", suspect);
+      make_label(p, h, &lv_font_unscii_8, C_SUB);
+  } else {
+      make_label(p, "No drones detected", &lv_font_montserrat_16, C_GREEN_SFT);
+  }
+  make_label(box, "Press action to sniff again", &lv_font_unscii_8, C_MUTE);
 }
 
-static void tool_fwdump(lv_obj_t *box) {         // Tools > Firmware dump
+static void tool_droneid(lv_obj_t *box) {
   lv_obj_t *p = panel(box);
-  const uint8_t jedec[3] = {0xEF, 0x40, 0x18};   // demo: W25Q128 (Winbond 16 MiB)
+  make_label(p, "DRONE SPOTTER", &lv_font_unscii_8, C_CYAN);
+  make_label(p, "Sniffing airspace...", &lv_font_montserrat_16, C_TXT);
+  ui_anim_radar_create(p, 80, lv_color_hex(C_CYAN));
+  
+  ble_scan_async(5);
+  s_active_tool_timer = lv_timer_create(droneid_timer_cb, 500, box);
+  g_cleanup_cb = tool_timer_cleanup;
+}
+
+#define FWDUMP_BYTES (64 * 1024)   // bounded chunk from offset 0 -- storage_save is one-shot (new file/call)
+static lv_obj_t *g_fwdump_status = nullptr;
+
+static void fwdump_action() {
+  if (!g_fwdump_status) return;
+  uint8_t *buf = (uint8_t *)ps_malloc(FWDUMP_BYTES);
+  if (!buf) { lv_label_set_text(g_fwdump_status, "PSRAM alloc failed"); return; }
+  bool ok = esp_flash_read(NULL, buf, 0, FWDUMP_BYTES) == ESP_OK;
+  const char *path = ok ? storage_save(SAVE_FW, "bin", buf, FWDUMP_BYTES) : "";
+  free(buf);
+  if (!ok) lv_label_set_text(g_fwdump_status, "flash read failed");
+  else if (!path || !path[0]) lv_label_set_text(g_fwdump_status, "no SD card");
+  else { char h[64]; snprintf(h, sizeof h, "dumped 64KB -> %s", path); lv_label_set_text(g_fwdump_status, h); }
+}
+
+static void tool_fwdump(lv_obj_t *box) {
+  lv_obj_t *p = panel(box);
+  uint32_t id = 0;
+  esp_flash_read_id(NULL, &id);
+  uint8_t jedec[3] = { (uint8_t)(id & 0xFF), (uint8_t)((id >> 8) & 0xFF), (uint8_t)((id >> 16) & 0xFF) };
   uint32_t bytes = jedec_capacity_bytes(jedec[2]);
+
   make_label(p, "FIRMWARE DUMP", &lv_font_unscii_8, C_GREEN);
-  char id[40]; snprintf(id, sizeof id, "JEDEC %02X %02X %02X", jedec[0], jedec[1], jedec[2]);
-  make_label(p, id, &lv_font_unscii_8, C_SUB);
-  char h[48]; snprintf(h, sizeof h, "%s  -  %lu MB", jedec_manuf(jedec[0]),
-                       (unsigned long)(bytes / (1024 * 1024)));
+  char id_str[40]; snprintf(id_str, sizeof id_str, "JEDEC %02X %02X %02X", jedec[0], jedec[1], jedec[2]);
+  make_label(p, id_str, &lv_font_unscii_8, C_SUB);
+  char h[48]; snprintf(h, sizeof h, "%s  -  %lu MB", jedec_manuf(jedec[0]), (unsigned long)(bytes / (1024 * 1024)));
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
-  make_label(p, "read chip -> dump.bin on SD", &lv_font_montserrat_14, C_GREEN_SFT);
-  make_label(box, "clip onto SPI flash - read = bring-up", &lv_font_unscii_8, C_MUTE);
+  make_label(p, "Internal Flash (ESP32)", &lv_font_montserrat_14, C_GREEN_SFT);
+  g_fwdump_status = make_label(box, "ACTION = dump first 64KB to SD", &lv_font_unscii_8, C_MUTE);
+  g_action_cb = fwdump_action;
 }
 
 static int       g_gpio_pin = 5;                 // live GPIO selector state
+static bool      g_gpio_state = false;            // last-driven level (per visit)
 static lv_obj_t *g_gpio_lbl = nullptr;
 
 static void gpio_paint(int pin) {
@@ -1339,33 +1648,64 @@ static void gpio_paint(int pin) {
   lv_obj_set_style_text_color(g_gpio_lbl, lv_color_hex(ok ? C_TXT : C_RED), 0);
 }
 
+static void gpio_toggle_action() {
+  if (!gpio_usable(g_gpio_pin)) return;
+  g_gpio_state = !g_gpio_state;
+  pinMode(g_gpio_pin, OUTPUT);
+  digitalWrite(g_gpio_pin, g_gpio_state ? HIGH : LOW);
+  if (g_gpio_lbl)
+    lv_label_set_text_fmt(g_gpio_lbl, "GPIO %d  -  driven %s", g_gpio_pin,
+                          g_gpio_state ? "HIGH" : "LOW");
+}
+
 static void tool_gpio(lv_obj_t *box) {           // Tools > GPIO play
   lv_obj_t *p = panel(box);
   make_label(p, "GPIO PLAY", &lv_font_unscii_8, C_GREEN);
   g_gpio_lbl = make_label(p, "", &lv_font_montserrat_20, C_TXT);
   make_label(p, "toggle HIGH/LOW, read state", &lv_font_montserrat_14, C_SUB);
   make_label(p, "flash/PSRAM pins 26-37 locked out", &lv_font_montserrat_14, C_AMBER);
-  make_label(box, "rotate = pin   click = toggle (bring-up)",
+  make_label(box, "rotate = pin   ACTION = toggle",
              &lv_font_unscii_8, C_MUTE);
   gpio_paint(g_gpio_pin);
   // Live-select: rotary walks GPIO 0..48, colouring reserved pins red.
   g_edit_val = &g_gpio_pin;
   g_edit_min = 0; g_edit_max = 48; g_edit_step = 1;
   g_edit_cb = gpio_paint;
+  g_action_cb = gpio_toggle_action;
+}
+
+static lv_obj_t *g_i2c_panel = nullptr;
+
+static void i2c_scan_paint() {
+  if (!g_i2c_panel) return;
+  lv_obj_clean(g_i2c_panel);
+  lv_obj_t *p = g_i2c_panel;
+  make_label(p, "I2C SCAN", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "live probe, 0x08-0x77", &lv_font_montserrat_16, C_TXT);
+  uint8_t found[16]; int nfound = 0;
+  for (uint8_t a = 0x08; a <= 0x77 && nfound < 16; a++) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) found[nfound++] = a;
+  }
+  if (nfound == 0) {
+    make_label(p, "no devices answered", &lv_font_montserrat_16, C_RED);
+  } else {
+    char h[80]; int o = 0;
+    for (int k = 0; k < nfound; k++)
+      o += snprintf(h + o, sizeof h - o, k ? " %02X" : "%02X", found[k]);
+    make_label(p, h, &lv_font_unscii_8, C_SUB);
+    for (int k = 0; k < nfound; k++) {
+      const char *nm = i2c_device_name(found[k]);
+      if (nm) make_label(p, nm, &lv_font_montserrat_14, C_GREEN_SFT);
+    }
+  }
 }
 
 static void tool_buspirate(lv_obj_t *box) {      // Tools > Bus Pirate
-  lv_obj_t *p = panel(box);
-  make_label(p, "I2C SCAN", &lv_font_unscii_8, C_GREEN);
-  make_label(p, "sniff & probe I2C/SPI/UART", &lv_font_montserrat_16, C_TXT);
-  // Demo: name the addresses this board is expected to answer at.
-  const uint8_t addrs[] = {0x20, 0x24, 0x36, 0x68};
-  char h[64]; int o = 0;
-  for (unsigned k = 0; k < sizeof addrs; k++)
-    o += snprintf(h + o, sizeof h - o, k ? " %02X" : "%02X", addrs[k]);
-  make_label(p, h, &lv_font_unscii_8, C_SUB);
-  make_label(p, i2c_device_name(0x24), &lv_font_montserrat_14, C_GREEN_SFT);
-  make_label(box, "live bus scan (Wire) = bring-up", &lv_font_unscii_8, C_MUTE);
+  g_i2c_panel = panel(box);
+  i2c_scan_paint();
+  make_label(box, "ACTION = rescan", &lv_font_unscii_8, C_MUTE);
+  g_action_cb = i2c_scan_paint;
 }
 
 static void tool_wardrive(lv_obj_t *box) {       // WiFi > Wardrive
@@ -1458,10 +1798,7 @@ static void tool_transit(lv_obj_t *box) {        // RFID/NFC > Transit card
   lv_obj_t *p = panel(box);
   make_label(p, "TRANSIT CARD", &lv_font_unscii_8, C_GREEN);
   if (!nfc_present()) {
-    char r[16]; fmt_rupees(24550, r, sizeof r);
-    make_label(p, "demo - PN532 not detected", &lv_font_montserrat_16, C_AMBER);
-    char line[40]; snprintf(line, sizeof line, "Delhi Metro  %s", r);
-    make_label(p, line, &lv_font_montserrat_14, C_SUB);
+    make_label(p, "PN532 not detected", &lv_font_montserrat_16, C_RED);
     return;
   }
   uint8_t uid[7], len = 0;
@@ -1471,18 +1808,33 @@ static void tool_transit(lv_obj_t *box) {        // RFID/NFC > Transit card
   make_label(box, "balance block is card-specific (bring-up)", &lv_font_unscii_8, C_MUTE);
 }
 
+static uint8_t   g_ndef_tag[96];
+static size_t    g_ndef_tag_len = 0;
+static lv_obj_t *g_ndef_status = nullptr;
+
+static void ndef_write_action() {
+  if (!g_ndef_status) return;
+  if (!nfc_present()) { lv_label_set_text(g_ndef_status, "PN532 not detected"); return; }
+  uint8_t uid[7], len = 0;
+  if (!nfc_read_uid(uid, &len)) { lv_label_set_text(g_ndef_status, "no tag - tap one first"); return; }
+  lv_label_set_text(g_ndef_status,
+    nfc_write_ndef(g_ndef_tag, g_ndef_tag_len) ? "written!" : "write failed");
+}
+
 static void tool_ndef(lv_obj_t *box) {           // RFID/NFC > Write NDEF tag
   lv_obj_t *p = panel(box);
   const char *url = "https://github.com/kavin-jain";
   uint8_t rec[64];
   size_t n = ndef_uri_record(url, rec, sizeof rec);
+  g_ndef_tag_len = ndef_tlv_wrap(rec, n, g_ndef_tag, sizeof g_ndef_tag);
   make_label(p, "WRITE NDEF TAG", &lv_font_unscii_8, C_GREEN);
   make_label(p, url, &lv_font_montserrat_14, C_TXT);
   char h[40]; snprintf(h, sizeof h, "NDEF record ready: %u bytes", (unsigned)n);
   make_label(p, h, &lv_font_montserrat_14, C_GREEN_SFT);
-  make_label(p, nfc_present() ? "tap an NTAG - click to write"
-                              : "demo - PN532 not detected",
+  g_ndef_status = make_label(p, nfc_present() ? "tap an NTAG, ACTION to write"
+                                              : "PN532 not detected",
              &lv_font_montserrat_14, C_SUB);
+  g_action_cb = ndef_write_action;
 }
 
 static void tool_gatt(lv_obj_t *box) {           // Bluetooth > GATT explore
@@ -1572,57 +1924,12 @@ static void build_tool(int c, int i) {
   lv_obj_t *scr = new_screen(CATS[c].name);
   section(scr, t.code);
   lv_obj_t *box = content_box(scr);
-  if      (c == 0 && i == 0) tool_freq_finder(box);   // Sub-GHz > Frequency finder
-  else if (c == 0 && i == 1) tool_subghz_capture(box);// Sub-GHz > Capture & replay
-  else if (c == 0 && i == 4) tool_ism(box);           // Sub-GHz > ISM decoder
-  else if (c == 0 && i == 5) tool_wmbus(box);         // Sub-GHz > wM-Bus meter
-  else if (c == 1 && i == 0) tool_nfc_read(box);      // RFID/NFC > Read / clone
-  else if (c == 1 && i == 1) tool_mifare(box);        // RFID/NFC > Mifare crack
-  else if (c == 1 && i == 2) tool_emv(box);           // RFID/NFC > Bank card read
-  else if (c == 1 && i == 5) tool_amiibo(box);        // RFID/NFC > Amiibo clone
-  else if (c == 1 && i == 3) tool_transit(box);       // RFID/NFC > Transit card
-  else if (c == 1 && i == 4) tool_ndef(box);          // RFID/NFC > Write NDEF tag
-  else if (c == 1 && i == 6) tool_ibutton(box);       // RFID/NFC > iButton key
-  else if (c == 2 && i == 0) tool_ir_universal(box);  // IR > Universal remote
-  else if (c == 2 && i == 1) tool_ir_learn(box);      // IR > Learn & blast
-  else if (c == 2 && i == 2) tool_tvbgone(box);       // IR > TV-B-Gone
-  else if (c == 9 && i == 0) tool_tvbgone(box);       // Pranks > TV-B-Gone
-  else if (c == 9 && i == 1) tool_rickroll(box);      // Pranks > Rickroll tag
-  else if (c == 9 && i == 2) tool_hackscreen(box);    // Pranks > Hacker screen
-  else if (c == 9 && i == 3) tool_usbgag(box);        // Pranks > USB gag
-  else if (c == 9 && i == 4) tool_castcrash(box);     // Pranks > Cast crasher
-  else if (c == 3 && i == 0) tool_wifi_scan(box);     // WiFi > Scan / recon
-  else if (c == 3 && i == 1) tool_deauth_atk(box);    // WiFi > Deauth (authorized)
-  else if (c == 3 && i == 2) tool_evilportal(box);    // WiFi > Evil Portal
-  else if (c == 3 && i == 3) tool_handshake(box);     // WiFi > Handshake / PMKID
-  else if (c == 3 && i == 4) tool_wardrive(box);      // WiFi > Wardrive
-  else if (c == 3 && i == 5) tool_karma(box);         // WiFi > Karma / MANA
-  else if (c == 4 && i == 0) tool_ble_scan(box);      // Bluetooth > Scan / recon
-  else if (c == 4 && i == 1) tool_gatt(box);          // Bluetooth > GATT explore
-  else if (c == 4 && i == 2) tool_tracker_hunt(box);  // Bluetooth > Tracker hunt
-  else if (c == 4 && i == 3) tool_wof(box);           // Bluetooth > Wall of Flipper
-  else if (c == 5 && i == 0) tool_mousejack(box);     // NRF24 / 2.4GHz > Mousejack
-  else if (c == 5 && i == 1) tool_keysniff(box);      // NRF24 / 2.4GHz > Keyboard sniff
-  else if (c == 5 && i == 2) tool_nrf_scan(box);      // NRF24 / 2.4GHz > Band scanner
-  else if (c == 8 && i == 0) tool_csi(box);           // See invisible > See through wall
-  else if (c == 8 && i == 1) tool_df(box);            // See invisible > Direction finder
-  else if (c == 6 && i == 0) tool_badusb(box);        // BadUSB / HID > DuckyScript
-  else if (c == 6 && i == 1) tool_hidattack(box);     // BadUSB / HID > HID attacks
-  else if (c == 10 && i == 0) tool_buspirate(box);    // Tools / Bench > Bus Pirate
-  else if (c == 10 && i == 1) tool_fwdump(box);       // Tools / Bench > Firmware dump
-  else if (c == 10 && i == 2) tool_gpio(box);         // Tools / Bench > GPIO play
-  else if (c == 11 && i == 0) tool_espnow(box);       // Comms / Off-grid > ESP-NOW mesh
-  else if (c == 11 && i == 1) tool_usbhost(box);      // Comms / Off-grid > USB host
-  else if (c == 12 && i == 0) tool_usage(box);        // Me > Claude usage
-  else if (c == 12 && i == 1) tool_calendar(box);     // Me > Calendar
-  else if (c == 12 && i == 2) tool_tasks(box);        // Me > Tasks
-  else if (c == 7 && i == 0) tool_camera(box);        // Am I safe? > Hidden camera
-  else if (c == 7 && i == 1) tool_tracker(box);       // Am I safe? > Tracker on me?
-  else if (c == 7 && i == 3) tool_deauth(box);        // Am I safe? > Deauth detector
-  else if (c == 7 && i == 2) tool_audiobug(box);      // Am I safe? > Audio bug sweep
-  else if (c == 7 && i == 4) tool_skimmer(box);       // Am I safe? > Skimmer detector
-  else if (c == 7 && i == 5) tool_droneid(box);       // Am I safe? > Drone spotter
-  else                       tool_generic(box, t);
+  
+  if (t.render) {
+    t.render(box);
+  } else {
+    tool_generic(box, t);
+  }
   load_screen(scr);
 }
 
@@ -1746,6 +2053,14 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("[ui] boot — UI shell m2");
+  bus_locks_init();
+
+  // De-assert all SPI CS pins so uninitialized modules don't corrupt the buses
+  pinMode(PIN_SD_CS, OUTPUT); digitalWrite(PIN_SD_CS, HIGH);
+  pinMode(PIN_CC1101_1_CS, OUTPUT); digitalWrite(PIN_CC1101_1_CS, HIGH);
+  pinMode(PIN_CC1101_2_CS, OUTPUT); digitalWrite(PIN_CC1101_2_CS, HIGH);
+  pinMode(PIN_NRF24_1_CS, OUTPUT); digitalWrite(PIN_NRF24_1_CS, HIGH);
+  pinMode(PIN_NRF24_2_CS, OUTPUT); digitalWrite(PIN_NRF24_2_CS, HIGH);
 
   // backlight PWM (no-op until the LED pin is rewired off 3V3 to PIN_BL_PWM)
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -1757,7 +2072,7 @@ void setup() {
   bl_write(bl_user_duty);
 
   tft.init();
-  tft.setRotation(1);
+  tft.setRotation(3);
   tft.setSwapBytes(true);
 
   // SD shares SPI-A with the TFT — mount after the display bus is up.
@@ -1803,7 +2118,9 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_B), enc_isr, CHANGE);
 
   // expander — buttons + encoder click (graceful if not wired yet)
+  Wire.setPins(PIN_I2C_SDA, PIN_I2C_SCL);
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_FREQ_HZ);
+
   mcp_ok = mcp.begin_I2C(MCP_ADDR, &Wire);
   if (mcp_ok) {
     for (uint8_t p = 0; p <= MCP_ENC_SW; p++) mcp.pinMode(p, INPUT_PULLUP);

@@ -21,8 +21,19 @@ void wifi_begin() { ensure_begin(); }
 
 int wifi_scan() {
   ensure_begin();
-  s_count = WiFi.scanNetworks();
+  s_count = WiFi.scanNetworks(false);
   return s_count;
+}
+
+void wifi_scan_async() {
+  ensure_begin();
+  WiFi.scanNetworks(true);
+}
+
+int wifi_scan_complete() {
+  int n = WiFi.scanComplete();
+  if (n >= 0) s_count = n;
+  return n;
 }
 
 int wifi_count() { return s_count; }

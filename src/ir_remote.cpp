@@ -23,7 +23,7 @@ static bool s_ready = false;
 
 bool ir_begin() {
   irsend.begin();
-  irrecv.enableIRIn();
+  irrecv.enableIRIn(true);   // pullup: some TSOP-compatible clones float when idle
   s_ready = true;
   return true;
 }

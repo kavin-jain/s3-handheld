@@ -6,13 +6,13 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <RF24.h>
+#include "bus_locks.h"
 
 // ponytail: NRF24 shares SPI-B with the CC1101. The SmartRC lib makes its own
 // HSPI instance and RF24 uses this one — on real hardware only one radio may
 // drive the bus at a time (each has its own CS). If they fight, unify onto a
 // single shared SPIClass + per-device CS. Lazy init keeps them off the bus at
 // boot. Untested without hardware — see docs/BRINGUP.md (NRF24).
-static SPIClass nrfSPI(HSPI);
 static RF24 radio(PIN_NRF24_1_CE, PIN_NRF24_1_CS);
 static bool s_begun = false, s_present = false, s_scanned = false;
 static uint8_t s_counts[NRF_CHAN];
@@ -20,8 +20,9 @@ static uint8_t s_counts[NRF_CHAN];
 static void ensure() {
   if (s_begun) return;
   s_begun = true;
-  nrfSPI.begin(PIN_SPIB_SCLK, PIN_SPIB_MISO, PIN_SPIB_MOSI, PIN_NRF24_1_CS);
-  s_present = radio.begin(&nrfSPI) && radio.isChipConnected();
+  // CC1101 already configures global SPI with SPI-B pins at boot. 
+  // RF24 can just share the global SPI object.
+  s_present = radio.begin(&SPI) && radio.isChipConnected();
   if (s_present) {
     radio.setPALevel((rf24_pa_dbm_e)pwr_nrf24_pa(power_level()));  // intensity dial
     radio.setDataRate(RF24_2MBPS);           // full throughput; drop to 250KBPS for range
@@ -30,11 +31,18 @@ static void ensure() {
   }
 }
 
-bool nrf_present() { ensure(); return s_present; }
+bool nrf_present() {
+  if (spi_b_mutex) xSemaphoreTakeRecursive(spi_b_mutex, portMAX_DELAY);
+  ensure();
+  bool p = s_present;
+  if (spi_b_mutex) xSemaphoreGiveRecursive(spi_b_mutex);
+  return p;
+}
 
 void nrf_scan() {
+  if (spi_b_mutex) xSemaphoreTakeRecursive(spi_b_mutex, portMAX_DELAY);
   ensure();
-  if (!s_present) return;
+  if (!s_present) { if (spi_b_mutex) xSemaphoreGiveRecursive(spi_b_mutex); return; }
   for (int ch = 0; ch < NRF_CHAN; ch++) {
     s_counts[ch] = 0;
     radio.setChannel(ch);
@@ -46,6 +54,7 @@ void nrf_scan() {
     }
   }
   s_scanned = true;
+  if (spi_b_mutex) xSemaphoreGiveRecursive(spi_b_mutex);
 }
 
 bool    nrf_scanned() { return s_scanned; }
@@ -58,8 +67,9 @@ uint8_t nrf_activity(int ch) { return (ch >= 0 && ch < NRF_CHAN) ? s_counts[ch] 
 // target — see docs/BRINGUP.md (NRF24 Mousejack).
 bool nrf_mousejack_inject(const uint8_t addr[5], int channel,
                           const uint8_t frames[][10], int n) {
+  if (spi_b_mutex) xSemaphoreTakeRecursive(spi_b_mutex, portMAX_DELAY);
   ensure();
-  if (!s_present || !addr || !frames || n <= 0) return false;
+  if (!s_present || !addr || !frames || n <= 0) { if (spi_b_mutex) xSemaphoreGiveRecursive(spi_b_mutex); return false; }
   radio.stopListening();
   radio.setChannel(channel);
   radio.setAutoAck(false);
@@ -69,5 +79,6 @@ bool nrf_mousejack_inject(const uint8_t addr[5], int channel,
     if (!radio.write(frames[i], 10)) ok = false;
     delayMicroseconds(1200);                // pacing between HID reports
   }
+  if (spi_b_mutex) xSemaphoreGiveRecursive(spi_b_mutex);
   return ok;
 }

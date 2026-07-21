@@ -3,6 +3,8 @@
 
 void        wifi_begin();          // bring up STA mode (lazy; called by wifi_scan too)
 int         wifi_scan();           // (re)scan, returns network count (blocks ~2 s)
+void        wifi_scan_async();     // starts a non-blocking scan
+int         wifi_scan_complete();  // returns count, -1 if scanning, -2 if failed
 int         wifi_count();          // last scan's count
 const char *wifi_ssid(int i);
 int         wifi_rssi(int i);

@@ -21,11 +21,10 @@ static void ensure() {
 
 void ble_begin() { ensure(); }
 
-int ble_scan(int seconds) {
-  ensure();
-  BLEScan *sc = BLEDevice::getScan();
-  sc->setActiveScan(true);
-  BLEScanResults res = sc->start(seconds, false);
+static volatile bool s_scanning = false;
+static volatile bool s_scan_done = false;
+
+static void scan_done_cb(BLEScanResults res) {
   int n = res.getCount();
   if (n > BLE_MAX) n = BLE_MAX;
   for (int i = 0; i < n; i++) {
@@ -41,8 +40,36 @@ int ble_scan(int seconds) {
     s_track[i] = tr;
   }
   s_count = n;
-  sc->clearResults();
+  BLEDevice::getScan()->clearResults();
+  s_scanning = false;
+  s_scan_done = true;
+}
+
+int ble_scan(int seconds) {
+  ensure();
+  BLEScan *sc = BLEDevice::getScan();
+  sc->setActiveScan(true);
+  BLEScanResults res = sc->start(seconds, false);
+  scan_done_cb(res);
   return s_count;
+}
+
+void ble_scan_async(int seconds) {
+  ensure();
+  if (s_scanning) return;
+  s_scanning = true;
+  s_scan_done = false;
+  BLEScan *sc = BLEDevice::getScan();
+  sc->setActiveScan(true);
+  sc->start(seconds, scan_done_cb, false);
+}
+
+bool ble_scan_complete() {
+  if (s_scan_done) {
+    s_scan_done = false;
+    return true;
+  }
+  return false;
 }
 
 int         ble_count() { return s_count; }

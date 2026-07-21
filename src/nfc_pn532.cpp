@@ -34,6 +34,18 @@ bool nfc_auth_block(uint8_t *uid, uint8_t uidLen, uint8_t block, uint8_t keyType
                                              (uint8_t *)key) == 1;
 }
 
+bool nfc_write_ndef(const uint8_t *tlv, size_t len) {
+  if (!s_present || !tlv) return false;
+  uint8_t page[4];
+  for (size_t off = 0, pg = 4; off < len; off += 4, pg++) {
+    memset(page, 0, sizeof page);
+    size_t n = (len - off) < 4 ? (len - off) : 4;
+    memcpy(page, tlv + off, n);
+    if (nfc.ntag2xx_WritePage((uint8_t)pg, page) != 1) return false;
+  }
+  return true;
+}
+
 bool nfc_crack_block(uint8_t *uid, uint8_t uidLen, uint8_t block, uint8_t keyType,
                      const char *dictPath, uint8_t outKey[6]) {
   if (!s_present || !dictPath || !outKey) return false;

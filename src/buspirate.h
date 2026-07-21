@@ -11,7 +11,8 @@ static inline bool    i2c_is_read(uint8_t byte) { return byte & 1; }   // bit0 =
 static inline const char *i2c_device_name(uint8_t addr7) {
   switch (addr7) {
     case 0x20: return "MCP23017 GPIO";       // this board's button expander
-    case 0x24: return "PN532 NFC";           // this board's NFC reader
+    case 0x24: return "PN532 NFC";           // this board's NFC reader (datasheet default)
+    case 0x28: return "PN532 NFC";           // this board's actual observed address -- see lib/Adafruit_PN532
     case 0x36: return "MAX17048 fuel gauge"; // this board's battery gauge
     case 0x3C: return "SSD1306 OLED";
     case 0x50: return "AT24 EEPROM";

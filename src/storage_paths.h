@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-enum SaveKind { SAVE_SUBGHZ = 0, SAVE_NFC, SAVE_IR, SAVE_WIFI, SAVE_BADUSB, SAVE_KIND_N };
+enum SaveKind { SAVE_SUBGHZ = 0, SAVE_NFC, SAVE_IR, SAVE_WIFI, SAVE_BADUSB, SAVE_FW, SAVE_KIND_N };
 
 static inline const char *sp_dir(int k) {
   switch (k) {
@@ -15,6 +15,7 @@ static inline const char *sp_dir(int k) {
     case SAVE_IR:     return "/ir";
     case SAVE_WIFI:   return "/wifi";
     case SAVE_BADUSB: return "/badusb";
+    case SAVE_FW:     return "/fw";
     default:          return "/misc";
   }
 }
@@ -26,6 +27,7 @@ static inline const char *sp_prefix(int k) {
     case SAVE_IR:     return "ir";
     case SAVE_WIFI:   return "wifi";
     case SAVE_BADUSB: return "duck";
+    case SAVE_FW:     return "dump";
     default:          return "cap";
   }
 }

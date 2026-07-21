@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 380" width="300" height="380" role="img" aria-label="Lord Hanuman ji">
+  <defs>
+    <radialGradient id="halo" cx="50%" cy="42%" r="60%">
+      <stop offset="0%"  stop-color="#fff6cf" stop-opacity="0.95"/>
+      <stop offset="35%" stop-color="#ffd24a" stop-opacity="0.75"/>
+      <stop offset="70%" stop-color="#ff9a1f" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#ff8a00" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff1b0"/>
+      <stop offset="45%" stop-color="#ffcf3f"/>
+      <stop offset="100%" stop-color="#e88a00"/>
+    </linearGradient>
+    <linearGradient id="saffron" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffb04a"/>
+      <stop offset="55%" stop-color="#ff7a1a"/>
+      <stop offset="100%" stop-color="#d84315"/>
+    </linearGradient>
+    <radialGradient id="face" cx="50%" cy="42%" r="62%">
+      <stop offset="0%" stop-color="#ff8a5c"/>
+      <stop offset="60%" stop-color="#f2582b"/>
+      <stop offset="100%" stop-color="#c8401c"/>
+    </radialGradient>
+    <radialGradient id="muzzle" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#ffcf9a"/>
+      <stop offset="100%" stop-color="#ff9a5f"/>
+    </radialGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff9a5f"/>
+      <stop offset="100%" stop-color="#e2652f"/>
+    </linearGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="2.2"/></filter>
+    <g id="ray"><polygon points="150,8 145,120 155,120" fill="url(#gold)" opacity="0.55"/></g>
+  </defs>
+
+  <!-- radiant halo + rays -->
+  <g filter="url(#soft)" opacity="0.9">
+    <use href="#ray" transform="rotate(0 150 132)"/>
+    <use href="#ray" transform="rotate(30 150 132)"/>
+    <use href="#ray" transform="rotate(60 150 132)"/>
+    <use href="#ray" transform="rotate(90 150 132)"/>
+    <use href="#ray" transform="rotate(120 150 132)"/>
+    <use href="#ray" transform="rotate(150 150 132)"/>
+    <use href="#ray" transform="rotate(180 150 132)"/>
+    <use href="#ray" transform="rotate(210 150 132)"/>
+    <use href="#ray" transform="rotate(240 150 132)"/>
+    <use href="#ray" transform="rotate(270 150 132)"/>
+    <use href="#ray" transform="rotate(300 150 132)"/>
+    <use href="#ray" transform="rotate(330 150 132)"/>
+  </g>
+  <circle cx="150" cy="132" r="96" fill="url(#halo)"/>
+
+  <!-- gada (mace) resting behind the right shoulder -->
+  <g transform="rotate(18 232 250)">
+    <rect x="226" y="150" width="12" height="150" rx="6" fill="url(#gold)" stroke="#b56b00" stroke-width="1.5"/>
+    <ellipse cx="232" cy="150" rx="26" ry="30" fill="url(#gold)" stroke="#b56b00" stroke-width="2"/>
+    <ellipse cx="232" cy="150" rx="26" ry="30" fill="none" stroke="#fff3c4" stroke-width="1" opacity="0.6"/>
+    <line x1="210" y1="150" x2="254" y2="150" stroke="#b56b00" stroke-width="1.4" opacity="0.7"/>
+    <line x1="214" y1="134" x2="250" y2="166" stroke="#b56b00" stroke-width="1.2" opacity="0.5"/>
+  </g>
+
+  <!-- Ram flag (dhvaja) on the left -->
+  <g transform="translate(58 96)">
+    <rect x="-2" y="0" width="4" height="150" rx="2" fill="#8a5a2b"/>
+    <path d="M2 6 L64 22 L2 40 Z" fill="url(#saffron)" stroke="#b23a00" stroke-width="1.5"/>
+    <circle cx="0" cy="2" r="6" fill="url(#gold)"/>
+    <text x="20" y="28" font-family="serif" font-size="15" fill="#fff3d0" font-weight="700">&#2352;&#2366;&#2350;</text>
+  </g>
+
+  <!-- shoulders / saffron robe -->
+  <path d="M64 372 C70 300 96 268 150 268 C204 268 230 300 236 372 Z" fill="url(#saffron)"/>
+  <path d="M150 268 C120 300 116 348 120 372 L180 372 C184 348 180 300 150 268 Z" fill="#ffce7a" opacity="0.35"/>
+  <!-- sacred thread (janeu) -->
+  <path d="M120 292 C150 320 168 344 176 372" fill="none" stroke="#fff4d6" stroke-width="2" opacity="0.75"/>
+  <!-- gold necklace -->
+  <path d="M112 288 Q150 322 188 288" fill="none" stroke="url(#gold)" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="150" cy="316" r="6" fill="url(#gold)" stroke="#b56b00" stroke-width="1"/>
+
+  <!-- namaste hands at chest -->
+  <g>
+    <path d="M150 300 C140 292 138 276 150 262 C162 276 160 292 150 300 Z" fill="url(#skin)" stroke="#b8511f" stroke-width="1.5"/>
+    <line x1="150" y1="266" x2="150" y2="298" stroke="#b8511f" stroke-width="1" opacity="0.6"/>
+  </g>
+
+  <!-- head group -->
+  <g>
+    <!-- ears -->
+    <ellipse cx="94"  cy="150" rx="14" ry="20" fill="url(#face)" stroke="#a83716" stroke-width="1.5"/>
+    <ellipse cx="206" cy="150" rx="14" ry="20" fill="url(#face)" stroke="#a83716" stroke-width="1.5"/>
+    <ellipse cx="94"  cy="150" rx="6" ry="10" fill="#a83716" opacity="0.5"/>
+    <ellipse cx="206" cy="150" rx="6" ry="10" fill="#a83716" opacity="0.5"/>
+    <!-- gold earrings (kundal) -->
+    <circle cx="92" cy="172" r="6" fill="none" stroke="url(#gold)" stroke-width="3"/>
+    <circle cx="208" cy="172" r="6" fill="none" stroke="url(#gold)" stroke-width="3"/>
+
+    <!-- face -->
+    <ellipse cx="150" cy="150" rx="60" ry="64" fill="url(#face)" stroke="#a83716" stroke-width="1.5"/>
+    <!-- muzzle -->
+    <ellipse cx="150" cy="176" rx="34" ry="26" fill="url(#muzzle)"/>
+    <!-- brow ridge -->
+    <path d="M108 138 Q150 122 192 138" fill="none" stroke="#a83716" stroke-width="2" opacity="0.5"/>
+
+    <!-- vaishnav tilak on forehead -->
+    <path d="M138 108 L138 140 Q150 150 162 140 L162 108" fill="none" stroke="#fff4d6" stroke-width="5"/>
+    <line x1="150" y1="112" x2="150" y2="146" stroke="#e53935" stroke-width="4"/>
+
+    <!-- eyes: calm, dignified -->
+    <path d="M120 150 Q133 141 146 150 Q133 158 120 150 Z" fill="#fffaf0" stroke="#7a2a12" stroke-width="1.4"/>
+    <path d="M154 150 Q167 141 180 150 Q167 158 154 150 Z" fill="#fffaf0" stroke="#7a2a12" stroke-width="1.4"/>
+    <circle cx="133" cy="150" r="3.4" fill="#3a1a0c"/>
+    <circle cx="167" cy="150" r="3.4" fill="#3a1a0c"/>
+
+    <!-- nose + gentle mouth -->
+    <path d="M150 158 Q145 170 150 176 Q155 170 150 158 Z" fill="#b8511f" opacity="0.7"/>
+    <path d="M132 186 Q150 196 168 186" fill="none" stroke="#8a3315" stroke-width="2.2" stroke-linecap="round"/>
+
+    <!-- crown / mukut -->
+    <path d="M96 104 L112 66 L132 92 L150 54 L168 92 L188 66 L204 104 Z"
+          fill="url(#gold)" stroke="#b56b00" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="150" cy="74" r="7" fill="#e53935" stroke="#fff3c4" stroke-width="1.5"/>
+    <circle cx="120" cy="92" r="4" fill="#c62828" stroke="#fff3c4" stroke-width="1"/>
+    <circle cx="180" cy="92" r="4" fill="#c62828" stroke="#fff3c4" stroke-width="1"/>
+    <rect x="94" y="102" width="112" height="9" rx="4" fill="url(#gold)" stroke="#b56b00" stroke-width="1.5"/>
+  </g>
+</svg>
