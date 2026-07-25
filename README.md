@@ -27,12 +27,13 @@ language, with the raw MHz/hex one click away.
 6. [Driver circuits (buzzer, motor, backlight)](#driver-circuits)
 7. [Power & decoupling — read before you power on](#power--decoupling)
 8. [Build, flash & first boot](#build-flash--first-boot)
-9. [Firmware layout](#firmware-layout)
-10. [Feature maturity — what "working" means](#feature-maturity)
-11. [Testing](#testing)
-12. [Safety, legal & the red zone](#safety-legal--the-red-zone)
-13. [Licensing & credits](#licensing--credits)
-14. [Reference pinouts (external)](#reference-pinouts-external)
+9. [Build photos](#build-photos)
+10. [Firmware layout](#firmware-layout)
+11. [Feature maturity — what "working" means](#feature-maturity)
+12. [Testing](#testing)
+13. [Safety, legal & the red zone](#safety-legal--the-red-zone)
+14. [Licensing & credits](#licensing--credits)
+15. [Reference pinouts (external)](#reference-pinouts-external)
 
 ---
 
@@ -340,6 +341,21 @@ The project sets `ARDUINO_USB_CDC_ON_BOOT=1`, so `Serial` comes out of the **nat
 3. **NFC keys:** drop a `keys.dic` (one hex key per line) under `/nfc` to extend the Mifare dictionary crack beyond the built-in defaults.
 4. **Settings → Intensity** sets TX power for *every* radio: Low / Medium / **Max** (default). **Max can exceed local ISM/WiFi limits — run only where you're permitted.**
 5. Controls: **rotary = move/adjust · click = select · BACK / HOME / ACTION** (ACTION saves a capture).
+
+---
+
+## Build photos
+
+Bench assembly, radio wiring and the ILI9341 UI running live:
+
+<p>
+  <img src="docs/photos/bench-overview.jpeg" width="49%" alt="Bench overview: Pi, radios, display and tools laid out" />
+  <img src="docs/photos/bench-layout.jpeg" width="49%" alt="Parts laid out flat: radios, batteries, display, boost converter" />
+</p>
+<p>
+  <img src="docs/photos/bench-assembly-01.jpeg" width="49%" alt="Display module wired to the radio stack, held in hand next to the pinout reference" />
+  <img src="docs/photos/bench-assembly-02.jpeg" width="49%" alt="Close-up of the radio/display stack: CC1101s, NRF24s, IR emitter, rotary encoder" />
+</p>
 
 ---
 
