@@ -19,6 +19,7 @@
 #include "driver/gpio.h"
 #include "pins.h"
 #include "storage.h"
+#include "battery.h"
 #include "config.h"
 #include "power_ctl.h"
 #include "power_level.h"
@@ -557,9 +558,15 @@ static void build_statusbar(lv_obj_t *scr, const char *title) {
   lv_obj_set_style_pad_column(bar, 8, 0);
   make_label(bar, title, &lv_font_unscii_8, C_ACCENT);
   lv_obj_t *sp = plain(bar); lv_obj_set_flex_grow(sp, 1); lv_obj_set_height(sp, 1);
-  make_label(bar, LV_SYMBOL_GPS, &lv_font_montserrat_14, C_MUTE);
   make_label(bar, LV_SYMBOL_SD_CARD, &lv_font_montserrat_14, storage_ready() ? C_ACCENT : C_MUTE);
-  make_label(bar, LV_SYMBOL_BATTERY_FULL " 82%", &lv_font_unscii_8, C_ACCENT_SFT);
+  // No GPS icon here: no GPS driver exists in this firmware (TinyGPSPlus is a
+  // declared dependency, never instantiated) — a status icon with nothing real
+  // behind it is worse than no icon. Add it back once wardrive.h actually reads one.
+  if (batt_present()) {
+    char b[16]; snprintf(b, sizeof b, LV_SYMBOL_BATTERY_FULL " %d%%", batt_pct());
+    make_label(bar, b, &lv_font_unscii_8, C_ACCENT_SFT);
+  }
+  // No gauge -> no battery icon at all, same reasoning as GPS above.
 }
 
 // a focusable row: [chip] title / sub .......... [chevron], click -> nav dest
@@ -658,8 +665,17 @@ static lv_obj_t *new_screen(const char *title) {
   build_statusbar(scr, title);
   return scr;
 }
+// Forward (push into a submenu) slides left; back/home slides right — same
+// spatial convention as iOS/Android, so depth is legible from motion alone.
+// ponytail: fixed 150ms MOVE_* anim on every nav, no per-screen override.
+// Untested on hardware — SPI-A moves the full 240x320 buffer at 40MHz during
+// the slide; if that drops frames or tears on the real panel, drop to
+// LV_SCR_LOAD_ANIM_FADE_IN (half the redraw cost) or shorten to ~100ms.
+// See docs/BRINGUP.md.
+static bool g_nav_back = false;
 static void load_screen(lv_obj_t *scr) {
-  lv_scr_load_anim(scr, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);  // auto-delete old
+  lv_scr_load_anim(scr, g_nav_back ? LV_SCR_LOAD_ANIM_MOVE_RIGHT : LV_SCR_LOAD_ANIM_MOVE_LEFT,
+                    150, 0, true);  // auto-delete old
 }
 
 static void section(lv_obj_t *scr, const char *txt) {
@@ -2277,16 +2293,19 @@ static void render_top() {
 static void nav_push(ScreenT t, int cat, int tool) {
   if (nav_depth >= 8) return;
   nav_stack[nav_depth++] = { t, (int8_t)cat, (int8_t)tool };
+  g_nav_back = false;
   render_top();
 }
 static void nav_pop() {
   if (nav_depth <= 1) return;
   nav_depth--;
+  g_nav_back = true;
   render_top();
 }
 static void nav_home() {
   nav_depth = 1;
   nav_stack[0] = { SCR_HOME, 0, 0 };
+  g_nav_back = true;
   render_top();
 }
 static void nav_lock() {                            // boot/wake gate — see poll_buttons
@@ -2418,6 +2437,11 @@ void setup() {
   // PN532 NFC (shares the I2C bus started above)
   nfc_begin();
   Serial.printf("[nfc] PN532 %s\n", nfc_present() ? "present" : "absent");
+
+  // MAX17048 fuel gauge (shares the I2C bus too; optional per the BOM —
+  // absent is normal, the status bar just hides the battery icon then).
+  batt_begin();
+  Serial.printf("[batt] MAX17048 %s\n", batt_present() ? "present" : "absent");
 
   ir_begin();   // IR TX/RX (plain GPIO, always ready)
 
