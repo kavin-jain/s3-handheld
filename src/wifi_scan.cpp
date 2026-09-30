@@ -4,8 +4,6 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
-// ponytail: synchronous scan blocks ~2 s (freezes the UI once per entry). Fine for
-// a first cut; move to async WiFi.scanNetworks(true) + a refresh timer if it annoys.
 static bool s_begun = false;
 static int  s_count = 0;
 
@@ -18,12 +16,6 @@ static void ensure_begin() {
 }
 
 void wifi_begin() { ensure_begin(); }
-
-int wifi_scan() {
-  ensure_begin();
-  s_count = WiFi.scanNetworks(false);
-  return s_count;
-}
 
 void wifi_scan_async() {
   ensure_begin();

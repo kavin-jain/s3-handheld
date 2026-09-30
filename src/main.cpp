@@ -15,6 +15,7 @@
 #include <Wire.h>
 #include <Adafruit_MCP23X17.h>
 #include "esp_sleep.h"
+#include "esp_task_wdt.h"
 #include "driver/gpio.h"
 #include "pins.h"
 #include "storage.h"
@@ -80,6 +81,9 @@
 #define SLEEP_AFTER_MS   35000    // active -> sleep (dim + this gap)
 #define DIM_DUTY         40       // backlight duty in DIM (0..255)
 #define ENABLE_LIGHT_SLEEP 1      // 0 while USB-debugging (light sleep drops CDC)
+#define WDT_TIMEOUT_S    10       // task watchdog: a genuine hang (stuck SPI/I2C
+                                  // wait, radio driver loop) reboots instead of
+                                  // needing a manual power cycle in the field.
 #define ENC_STEPS_PER_DETENT 2    // EC11 quadrature transitions per click; tune
 
 // ---------------------------------------------------------------- palette (RGB)
@@ -1948,10 +1952,7 @@ static void tool_gatt(lv_obj_t *box) {           // Bluetooth > GATT explore
   make_label(box, "connect + enumerate a device = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
-static void tool_wof(lv_obj_t *box) {            // Bluetooth > Wall of Flipper
-  lv_obj_t *p = panel(box);
-  int n = ble_count();
-  if (n <= 0) n = ble_scan(3);
+static void wof_render(lv_obj_t *p, lv_obj_t *box, int n) {
   int gear = 0;
   make_label(p, "WALL OF FLIPPER", &lv_font_unscii_8, C_CYAN);
   for (int i = 0; i < n; i++) {
@@ -1962,9 +1963,35 @@ static void tool_wof(lv_obj_t *box) {            // Bluetooth > Wall of Flipper
     make_label(p, line, &lv_font_montserrat_14, C_AMBER);
   }
   if (gear == 0)
-    make_label(p, n > 0 ? "no hacking gear nearby" : "scanning...",
-               &lv_font_montserrat_16, C_ACCENT_SFT);
+    make_label(p, "no hacking gear nearby", &lv_font_montserrat_16, C_ACCENT_SFT);
   make_label(box, "spots Flippers / pwnagotchis / Marauders", &lv_font_unscii_8, C_MUTE);
+}
+
+static lv_obj_t *g_wof_panel = nullptr;
+static lv_obj_t *g_wof_box = nullptr;
+
+static void wof_poll_cb(lv_timer_t *t) {
+  if (!ble_scan_complete()) return;
+  lv_timer_del(g_tool_timer);
+  g_tool_timer = nullptr;
+  lv_obj_clean(g_wof_panel);
+  wof_render(g_wof_panel, g_wof_box, ble_count());
+}
+
+static void tool_wof(lv_obj_t *box) {            // Bluetooth > Wall of Flipper
+  lv_obj_t *p = panel(box);
+  int n = ble_count();
+  if (n > 0) { wof_render(p, box, n); return; }   // cached from a recent scan
+
+  // No cache yet — scan async so the UI (and encoder) stay live for the 3 s,
+  // instead of the old blocking ble_scan(3) that froze the whole device.
+  g_wof_panel = p;
+  g_wof_box = box;
+  make_label(p, "WALL OF FLIPPER", &lv_font_unscii_8, C_CYAN);
+  make_label(p, "scanning...", &lv_font_montserrat_16, C_ACCENT_SFT);
+  ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
+  ble_scan_async(3);
+  g_tool_timer = lv_timer_create(wof_poll_cb, 200, NULL);
 }
 
 static void tool_tracker_hunt(lv_obj_t *box) {   // Bluetooth > Tracker hunt
@@ -1980,10 +2007,7 @@ static void tool_tracker_hunt(lv_obj_t *box) {   // Bluetooth > Tracker hunt
   make_label(box, "BLE mfg-data scan = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
-static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
-  lv_obj_t *p = panel(box);
-  int n = ble_count();
-  if (n <= 0) n = ble_scan(3);
+static void tracker_render(lv_obj_t *p, lv_obj_t *box, int n) {
   int trackers = 0;
   for (int i = 0; i < n; i++) if (ble_is_tracker(i)) trackers++;
   make_label(p, "BUG SWEEP", &lv_font_unscii_8, C_CYAN);
@@ -1998,10 +2022,35 @@ static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
       make_label(p, line, &lv_font_montserrat_14, C_AMBER);
     }
   } else {
-    make_label(p, n > 0 ? "No trackers following you" : "scanning...",
-               &lv_font_montserrat_16, C_ACCENT_SFT);
+    make_label(p, "No trackers following you", &lv_font_montserrat_16, C_ACCENT_SFT);
   }
   make_label(box, "BLE sweep - camera/audio sweep next", &lv_font_montserrat_14, C_SUB);
+}
+
+static lv_obj_t *g_tracker_panel = nullptr;
+static lv_obj_t *g_tracker_box = nullptr;
+
+static void tracker_poll_cb(lv_timer_t *t) {
+  if (!ble_scan_complete()) return;
+  lv_timer_del(g_tool_timer);
+  g_tool_timer = nullptr;
+  lv_obj_clean(g_tracker_panel);
+  tracker_render(g_tracker_panel, g_tracker_box, ble_count());
+}
+
+static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
+  lv_obj_t *p = panel(box);
+  int n = ble_count();
+  if (n > 0) { tracker_render(p, box, n); return; }   // cached from a recent scan
+
+  // Async, same reason as Wall of Flipper above: don't block the UI for 3 s.
+  g_tracker_panel = p;
+  g_tracker_box = box;
+  make_label(p, "BUG SWEEP", &lv_font_unscii_8, C_CYAN);
+  make_label(p, "scanning...", &lv_font_montserrat_16, C_ACCENT_SFT);
+  ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
+  ble_scan_async(3);
+  g_tool_timer = lv_timer_create(tracker_poll_cb, 200, NULL);
 }
 
 static void tool_generic(lv_obj_t *box, const Tool &t) {
@@ -2284,6 +2333,8 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("[ui] boot — UI shell m2");
+  esp_task_wdt_init(WDT_TIMEOUT_S, true);   // panic+reboot on a genuine hang
+  esp_task_wdt_add(NULL);                   // watch this task (loop())
   bus_locks_init();
 
   // De-assert all SPI CS pins so uninitialized modules don't corrupt the buses
@@ -2387,6 +2438,7 @@ void setup() {
 }
 
 void loop() {
+  esp_task_wdt_reset();
   lv_timer_handler();
   pm_tick();
   enc_rearm_tick();

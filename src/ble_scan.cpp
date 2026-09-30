@@ -45,15 +45,6 @@ static void scan_done_cb(BLEScanResults res) {
   s_scan_done = true;
 }
 
-int ble_scan(int seconds) {
-  ensure();
-  BLEScan *sc = BLEDevice::getScan();
-  sc->setActiveScan(true);
-  BLEScanResults res = sc->start(seconds, false);
-  scan_done_cb(res);
-  return s_count;
-}
-
 void ble_scan_async(int seconds) {
   ensure();
   if (s_scanning) return;
