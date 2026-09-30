@@ -7,12 +7,19 @@
 #pragma once
 
 // ---- Display + onboard microSD share SPI-A (HSPI) ----
-// TFT pins go to TFT_eSPI via platformio.ini build flags (CS10 DC14 RST21).
-// The SD sits on the same bus with its own chip-select (GPIO9). Bus pins:
+// TFT pins go to TFT_eSPI via platformio.ini build flags (CS41 DC14 RST21).
+// The onboard microSD's CS is fixed by the carrier board's own PCB traces --
+// verified against the official Edgehax pinout (github.com/edgehax/esp32-s3-
+// wroom1-n16r8): the SD slot is wired to FSPIHD(9)/FSPICS0(10)/FSPID(11)/
+// FSPICLK(12)/FSPIQ(13). GPIO10 is FSPICS0 == the real CS, NOT GPIO9 (that's
+// HD/Hold) -- the old PIN_SD_CS=9 was toggling the wrong pin, so the card
+// could never be selected. TFT_CS was ALSO on GPIO10 (platformio.ini),
+// colliding with the SD's hardwired CS -- moved TFT_CS to GPIO41 (was an
+// unused PIN_PI_TX; every other GPIO on this chip is already claimed).
 #define PIN_SPIA_SCLK     12
 #define PIN_SPIA_MOSI     11
 #define PIN_SPIA_MISO     13
-#define PIN_SD_CS         9      // onboard microSD chip-select (leave to the board)
+#define PIN_SD_CS         10     // onboard microSD chip-select (FSPICS0, per official pinout)
 
 // ---- Backlight (power) ----
 // Panel "LED/BL" ships tied to 3V3 (always on). To enable dimming/auto-off,
@@ -30,7 +37,14 @@
 // ---- I2C bus (sensors + expander) ----
 #define PIN_I2C_SDA       1
 #define PIN_I2C_SCL       2
-#define I2C_FREQ_HZ       400000
+// 100kHz, not 400kHz: PN532 clock-stretches the bus during its I2C wakeup
+// (see Adafruit_PN532::wakeup() comment), and that's flaky at Fast Mode on a
+// marginal/soldered connection -- bus-scan ACKs (single byte) can pass at
+// 400kHz while the multi-byte getFirmwareVersion() handshake fails, which
+// matches what's happening on this board (0x28 shows in the scan, but
+// nfc_begin() still fails). 100kHz costs nothing measurable for MCP23017 or
+// MPU6050 either.
+#define I2C_FREQ_HZ       100000
 
 // ---- MCP23017 I/O expander (buttons, click, buzzer, motor) ----
 #define MCP_ADDR          0x20    // A0/A1/A2 -> GND
@@ -70,8 +84,11 @@
 // ---- UART ----
 #define PIN_GPS_TX        43      // ESP TX -> GPS RX
 #define PIN_GPS_RX        44      // ESP RX <- GPS TX
-#define PIN_PI_TX         41      // ESP TX -> Pi RXD
-#define PIN_PI_RX         42      // ESP RX <- Pi TXD
+// PIN_PI_TX (GPIO41) removed -- reclaimed as PIN_TFT_CS above (nothing used it,
+// the Pi-companion feature was never implemented). GPIO42 is still free if a Pi
+// link is ever built, but per the official pinout it's also GRN_LED -- expect
+// it to flicker if driven as a UART line.
+#define PIN_PI_RX         42      // ESP RX <- Pi TXD (also GRN_LED per official pinout)
 
-// ---- Onboard status LEDs (active-driven; also UART activity) ----
+// ---- Onboard status LEDs (per official Edgehax pinout: ORNG=40 WHT=41 GRN=42) ----
 #define PIN_LED_WHITE     40

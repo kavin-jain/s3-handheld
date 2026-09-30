@@ -25,6 +25,8 @@ bool ir_begin() {
   irsend.begin();
   irrecv.enableIRIn(true);   // pullup: some TSOP-compatible clones float when idle
   s_ready = true;
+  Serial.printf("[ir] ready: TX=GPIO%d RX=GPIO%d (idle level %d, should read HIGH)\n",
+               PIN_IR_TX, PIN_IR_RX, digitalRead(PIN_IR_RX));
   return true;
 }
 

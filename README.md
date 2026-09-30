@@ -119,7 +119,7 @@ The firmware is a single Arduino-ESP32 app. The design splits work across **two 
 - **SPI-B (bit-rate-limited, shared)** — all four radios (2× CC1101, 2× NRF24) share SCLK/MOSI/MISO, each with its own CS/CE. Per-device `SPISettings` cap the clock (CC1101 ≤ 6.5 MHz, NRF24 ≤ 10 MHz).
 - **I2C** — MCP23017 (inputs), PN532 (NFC), GY-87 (IMU), MAX17048 (fuel gauge).
 - **Native GPIO** — rotary encoder (interrupt-driven quadrature), IR TX/RX, UARTs (GPS, Pi).
-- **UI** — LVGL 8.3 renders a black/green "phosphor terminal" theme. A data-driven menu (13 categories → tools) is navigated with the encoder (move) + click (select) + BACK/HOME/ACTION. Editing (brightness, TX intensity) uses an encoder edit-mode.
+- **UI** — LVGL 8.3 renders a Death Note-themed charcoal/slate/off-white pixel-art UI, with a 4-digit PIN lock screen and L/Light/Ryuk/Misa mascot reactions on key moments (see `src/sprites.h`, `src/ui_mascot.h`, `src/ui_lock.h`). A data-driven menu (13 categories → tools) is navigated with the encoder (move) + click (select) + BACK/HOME/ACTION. Editing (brightness, TX intensity, PIN) uses an encoder edit-mode.
 - **Power manager** — an idle state machine (`pm_tick()`): active → dim → light-sleep, with GPIO wake on the encoder and the MCP INT line. Backlight dimming needs the [MOSFET mod](#driver-circuits) (until then it's a no-op and the panel stays lit).
 - **Global intensity** — one setting scales TX power for **every** radio at once: Low / Medium / **Max** (CC1101 dBm, NRF24 PA level, WiFi TX power all move together).
 

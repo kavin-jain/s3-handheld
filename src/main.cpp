@@ -1,12 +1,15 @@
 // ESP32-S3 handheld — UI shell, milestone 2.
-// Black/green "terminal" theme, rotary-encoder + 3-button navigation, a
-// Flipper-style menu tree, and a real idle power manager (dim -> light sleep).
+// Death Note pixel-art theme (charcoal/slate/off-white), rotary-encoder +
+// 3-button navigation, a Flipper-style menu tree, PIN lock screen, mascot
+// reactions (L/Light/Ryuk/Misa via ui_mascot.h), and a real idle power
+// manager (dim -> light sleep -> lock on wake).
 // Radio/NFC/etc. data is still static demo — live data is a later milestone.
 //
 // Controls:  rotate = move  ·  click = select  ·  BACK/HOME/ACTION buttons.
 // Renders through TFT_eSPI (confirmed working). Pins come from include/pins.h.
 
 #include <Arduino.h>
+#include <string.h>
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include <Wire.h>
@@ -80,25 +83,31 @@
 #define ENC_STEPS_PER_DETENT 2    // EC11 quadrature transitions per click; tune
 
 // ---------------------------------------------------------------- palette (RGB)
-#define C_BG        0x05070a
-#define C_CARD      0x0c1410
-#define C_CARD_FOC  0x11291c
-#define C_LINE      0x1a2a20
-#define C_CHIP      0x0f1d16
-#define C_GREEN     0x39ff14   // phosphor accent
-#define C_GREEN_SFT 0x57e389
-#define C_TXT       0xd7ffe6
-#define C_SUB       0x6f8f7c
-#define C_MUTE      0x46584e
-#define C_RED       0xff5c5c
-#define C_RED_BG    0x2a0f0f
-#define C_AMBER     0xffb454
-#define C_CYAN      0x54e6ff
-#define C_CYAN_BG   0x08222a
+// Death Note theme: charcoal/slate chrome, off-white "ink" accent — see
+// sprites.h for the matching character-art palette (INK/PAPER/SLATE/SLATE_D).
+// K_ATK/K_DEF/warning stay distinct hues on purpose — the badge system reads
+// by colour, not just text.
+#define C_BG        0x14181b
+#define C_CARD      0x232a2f
+#define C_CARD_FOC  0x30393f
+#define C_LINE      0x3a444b
+#define C_CHIP      0x2c363c
+#define C_ACCENT     0xEDE7DD   // ink accent — titles, focus ring, "ready" chips
+#define C_ACCENT_SFT 0xB9AE98   // soft/parchment sub-accent
+#define C_TXT       0xEDE7DD
+#define C_SUB       0x9aa3a8
+#define C_MUTE      0x5b656b
+#define C_RED       0xd9534f
+#define C_RED_BG    0x2a1414
+#define C_AMBER     0xd9a441
+#define C_CYAN      0x6fb3c2
+#define C_CYAN_BG   0x142428
 
 // ---------------------------------------------------------------- display glue
 #include "bus_locks.h"
 #include "ui_anim.h"
+#include "ui_mascot.h"
+#include "ui_lock.h"
 
 
 static TFT_eSPI tft = TFT_eSPI();
@@ -285,7 +294,7 @@ static const uint8_t N_CATS = sizeof(CATS) / sizeof(CATS[0]);
 
 // ---------------------------------------------------------------- nav + input
 enum ScreenT : uint8_t { SCR_HOME, SCR_AROUND, SCR_CATEGORY, SCR_TOOL, SCR_SETTINGS,
-                         SCR_EDIT_BRIGHT, SCR_EDIT_POWER };
+                         SCR_EDIT_BRIGHT, SCR_EDIT_POWER, SCR_SPLASH, SCR_LOCK, SCR_SET_PIN };
 struct NavEntry { ScreenT t; int8_t cat; int8_t tool; };
 static NavEntry nav_stack[8];
 static uint8_t  nav_depth = 0;
@@ -305,6 +314,16 @@ enum PM : uint8_t { PM_ACTIVE, PM_DIM, PM_SLEEP };
 static PM       pm_state = PM_ACTIVE;
 static uint32_t last_input_ms = 0;
 static uint8_t  bl_user_duty = 255;            // full brightness (Settings later)
+static bool     g_wake_needs_lock = false;     // set right before light-sleep; consumed by pm_wake()
+
+// ---------------------------------------------------------------- lock screen
+static LockState g_lock = {-1, {0, 0, 0, 0}, 0};   // pin=-1: no PIN configured
+static bool      g_locked = false;                 // gates poll_buttons() below
+static bool      g_lock_setting_new = false;        // SCR_LOCK (false) vs SCR_SET_PIN (true)
+static lv_obj_t *g_lock_dots[4] = {nullptr, nullptr, nullptr, nullptr};
+static lv_obj_t *g_lock_digit_lbl = nullptr;
+static lv_obj_t *g_lock_status_lbl = nullptr;
+static int       g_lock_digit = 0;                  // 0-9, driven by the encoder edit-mode
 
 static void bl_write(uint8_t duty) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -351,7 +370,7 @@ static void apply_brightness(int pct) {
 // Settings persistence: serialise current prefs to /config.txt (see config.h).
 static bool g_cfg_dirty = false;
 static void save_config_now() {
-  DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl};
+  DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl, g_lock.pin};
   char line[72];
   if (cfg_serialize(&cfg, line, sizeof line)) storage_save_config(line);
 }
@@ -367,14 +386,20 @@ static void power_edit_cb(int lvl) {
   set_power_level(lvl);                           // radios read this on next use
   if (g_edit_label) lv_label_set_text(g_edit_label, pwr_name(lvl));
   g_cfg_dirty = true;
+  if (lvl == PWR_MAX) mascot_play(lv_scr_act(), MASCOT_RYUK, LV_ALIGN_TOP_RIGHT, false);
 }
 
+static void nav_lock();
 static void pm_wake() {                        // -> ACTIVE (called on any input)
   last_input_ms = millis();
   if (pm_state != PM_ACTIVE) {
     setCpuFrequencyMhz(240);
     bl_write(bl_user_duty);
     pm_state = PM_ACTIVE;
+  }
+  if (g_wake_needs_lock) {                      // woke from an actual light-sleep
+    g_wake_needs_lock = false;
+    if (lock_configured(&g_lock)) nav_lock();
   }
 }
 
@@ -390,6 +415,7 @@ static void pm_tick() {
     Serial.flush();
     bl_write(0);
     pm_state = PM_SLEEP;
+    g_wake_needs_lock = true;
 #if ENABLE_LIGHT_SLEEP
     gpio_wakeup_enable((gpio_num_t)PIN_ENC_A, GPIO_INTR_LOW_LEVEL);
     gpio_wakeup_enable((gpio_num_t)PIN_ENC_B, GPIO_INTR_LOW_LEVEL);
@@ -406,11 +432,32 @@ static void pm_tick() {
 
 // ---------------------------------------------------------------- encoder ISR
 // Full-step quadrature decode: ±1 per valid transition, summed in enc_accum.
+// A plain time-gated debounce wasn't enough on this board: the shared GPIO ISR
+// dispatcher (gpio_isr_loop) keeps re-entering as long as the line keeps
+// toggling, regardless of how fast the handler body returns, and that alone
+// starved the watchdog. So mask the interrupt at the peripheral instead --
+// gpio_intr_disable() stops it from firing again at all until enc_rearm_tick()
+// (called from loop(), not ISR context) re-enables it after the line settles.
 static const int8_t QDEC[16] = {0,-1,1,0, 1,0,0,-1, -1,0,0,1, 0,1,-1,0};
+static volatile bool     enc_masked = false;
+static volatile uint32_t enc_mask_us = 0;
+#define ENC_REARM_US 3000   // gap before trusting the line again after a storm trip
 static void IRAM_ATTR enc_isr() {
+  gpio_intr_disable((gpio_num_t)PIN_ENC_A);
+  gpio_intr_disable((gpio_num_t)PIN_ENC_B);
+  enc_mask_us = micros();
+  enc_masked = true;
   uint8_t s = (digitalRead(PIN_ENC_A) << 1) | digitalRead(PIN_ENC_B);
   enc_accum += QDEC[((enc_prev << 2) | s) & 0x0f];
   enc_prev = s;
+}
+
+static void enc_rearm_tick() {
+  if (enc_masked && (uint32_t)(micros() - enc_mask_us) >= ENC_REARM_US) {
+    enc_masked = false;
+    gpio_intr_enable((gpio_num_t)PIN_ENC_A);
+    gpio_intr_enable((gpio_num_t)PIN_ENC_B);
+  }
 }
 
 static void pm_wake();
@@ -438,6 +485,7 @@ static void nav_pop();
 static void nav_home();
 static void on_action();
 
+static void lock_repaint_dots();               // fwd (defined near build_lock)
 static void poll_buttons(lv_timer_t *) {
   if (!mcp_ok) return;
   uint8_t pressed = (~mcp.readGPIOA()) & 0x0f;   // 1 = pressed
@@ -445,6 +493,15 @@ static void poll_buttons(lv_timer_t *) {
   btn_prev = pressed;
   g_enc_pressed = pressed & (1 << MCP_ENC_SW);
   if (edges) pm_wake();
+  if (g_locked) {                                // lock screen owns BACK/HOME;
+    if (edges & ((1 << MCP_BTN_BACK) | (1 << MCP_BTN_HOME))) {
+      lock_reset_entry(&g_lock);
+      lock_repaint_dots();
+    } else if (edges & (1 << MCP_BTN_ACTION)) {
+      on_action();                               // ACTION still confirms a digit
+    }
+    return;                                      // never falls through to nav
+  }
   if      (edges & (1 << MCP_BTN_BACK))   nav_pop();
   else if (edges & (1 << MCP_BTN_HOME))   nav_home();
   else if (edges & (1 << MCP_BTN_ACTION)) on_action();
@@ -476,7 +533,7 @@ static void kind_colors(Kind k, uint32_t &fg, uint32_t &bg) {
     case K_ATK:  fg = C_RED;   bg = C_RED_BG;  break;
     case K_DEF:  fg = C_CYAN;  bg = C_CYAN_BG; break;
     case K_SOON: fg = C_MUTE;  bg = C_LINE;    break;
-    default:     fg = C_GREEN; bg = C_CHIP;    break;
+    default:     fg = C_ACCENT; bg = C_CHIP;    break;
   }
 }
 static const char *kind_text(Kind k) {
@@ -494,11 +551,11 @@ static void build_statusbar(lv_obj_t *scr, const char *title) {
   lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_column(bar, 8, 0);
-  make_label(bar, title, &lv_font_unscii_8, C_GREEN);
+  make_label(bar, title, &lv_font_unscii_8, C_ACCENT);
   lv_obj_t *sp = plain(bar); lv_obj_set_flex_grow(sp, 1); lv_obj_set_height(sp, 1);
   make_label(bar, LV_SYMBOL_GPS, &lv_font_montserrat_14, C_MUTE);
-  make_label(bar, LV_SYMBOL_SD_CARD, &lv_font_montserrat_14, storage_ready() ? C_GREEN : C_MUTE);
-  make_label(bar, LV_SYMBOL_BATTERY_FULL " 82%", &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(bar, LV_SYMBOL_SD_CARD, &lv_font_montserrat_14, storage_ready() ? C_ACCENT : C_MUTE);
+  make_label(bar, LV_SYMBOL_BATTERY_FULL " 82%", &lv_font_unscii_8, C_ACCENT_SFT);
 }
 
 // a focusable row: [chip] title / sub .......... [chevron], click -> nav dest
@@ -580,6 +637,8 @@ static void build_tool(int c, int i);
 static void build_settings();
 static void build_edit_bright();
 static void build_edit_power();
+static void build_splash();
+static void build_lock(bool setting_new);
 
 static lv_timer_t *g_tool_timer = nullptr;
 static void (*g_cleanup_cb)() = nullptr;
@@ -609,10 +668,10 @@ static void build_home() {
   lv_obj_t *scr = new_screen("HANDHELD");
   section(scr, "AROUND ME");
   lv_obj_t *list = make_list(scr);
-  add_row(list, "\xE2\x97\x89", C_GREEN, "Around me", "live radar of what's near you",
-          "live", C_GREEN, C_CHIP, nav_code(SCR_AROUND, 0, 0));
+  add_row(list, "\xE2\x97\x89", C_ACCENT, "Around me", "live radar of what's near you",
+          "live", C_ACCENT, C_CHIP, nav_code(SCR_AROUND, 0, 0));
   for (uint8_t i = 0; i < N_CATS; i++)
-    add_row(list, CATS[i].icon, C_GREEN, CATS[i].name, CATS[i].tag,
+    add_row(list, CATS[i].icon, C_ACCENT, CATS[i].name, CATS[i].tag,
             NULL, 0, 0, nav_code(SCR_CATEGORY, i, 0));
   add_row(list, "SET", C_SUB, "Settings", "brightness, sleep, about",
           NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
@@ -644,9 +703,9 @@ static void build_around() {
   section(scr, "5 THINGS - THE REAL FREQ IS ON EACH CARD");
   lv_obj_t *list = make_list(scr);
   around_card(list, "RF",  C_RED,   "Car key fob",   "433.92 MHz  rolling code", "no copy", C_RED,  C_RED_BG);
-  around_card(list, "RF",  C_GREEN, "Gate remote",   "433.92 MHz  fixed code",   "copy",    C_GREEN,C_CHIP);
-  around_card(list, "IR",  C_AMBER, "Samsung TV",    "infrared  ready",          "control", C_GREEN,C_CHIP);
-  around_card(list, "WiFi",C_GREEN, "5 nets 9 devices","tap to see who is here", "explore", C_GREEN,C_CHIP);
+  around_card(list, "RF",  C_ACCENT, "Gate remote",   "433.92 MHz  fixed code",   "copy",    C_ACCENT,C_CHIP);
+  around_card(list, "IR",  C_AMBER, "Samsung TV",    "infrared  ready",          "control", C_ACCENT,C_CHIP);
+  around_card(list, "WiFi",C_ACCENT, "5 nets 9 devices","tap to see who is here", "explore", C_ACCENT,C_CHIP);
   around_card(list, "BLE", C_CYAN,  "AirTag nearby", "seen 3x  moving with you", "track?",  C_CYAN, C_CYAN_BG);
   load_screen(scr);
 }
@@ -692,15 +751,15 @@ static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
   if (g_freq_idx >= FREQ_N) g_freq_idx = 3;
   bool live = cc1101_present();
   lv_obj_t *p = panel(box);
-  g_freq_mhz = make_label(p, "", &lv_font_montserrat_28, C_GREEN);
+  g_freq_mhz = make_label(p, "", &lv_font_montserrat_28, C_ACCENT);
   g_freq_sub = make_label(p, "", &lv_font_unscii_8, C_SUB);
   g_freq_bar = lv_bar_create(p);
   lv_obj_set_size(g_freq_bar, lv_pct(100), 10);
   lv_obj_set_style_bg_color(g_freq_bar, lv_color_hex(C_LINE), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(g_freq_bar, lv_color_hex(C_GREEN), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(g_freq_bar, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
   g_freq_guess = make_label(p, "", &lv_font_montserrat_16, C_TXT);
   make_label(p, live ? "rotate to tune the band" : "demo - CC1101 not detected",
-             &lv_font_montserrat_14, live ? C_GREEN_SFT : C_AMBER);
+             &lv_font_montserrat_14, live ? C_ACCENT_SFT : C_AMBER);
   make_label(box, "rotate = band    click = lock", &lv_font_unscii_8, C_MUTE);
   freq_paint(g_freq_idx);
   // Live-select: encoder cycles the preset band and re-measures in place.
@@ -742,12 +801,13 @@ static void subghz_poll_cb(lv_timer_t *t) {
     
     g_sub_code = code; g_sub_bits = bits; g_sub_proto = proto;
     char h[40]; rcs_fmt(code, bits, proto, h, sizeof h);
-    make_label(g_sub_panel, "CAPTURED", &lv_font_unscii_8, C_GREEN);
+    make_label(g_sub_panel, "CAPTURED", &lv_font_unscii_8, C_ACCENT);
     make_label(g_sub_panel, h, &lv_font_montserrat_20, C_TXT);
     make_label(g_sub_panel, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
-    g_sub_status = make_label(g_sub_panel, "ACTION = save to /subghz", &lv_font_unscii_8, C_GREEN_SFT);
+    g_sub_status = make_label(g_sub_panel, "ACTION = save to /subghz", &lv_font_unscii_8, C_ACCENT_SFT);
     make_label(g_sub_box, "ACTION saves .sub -> SD    click = replay", &lv_font_unscii_8, C_MUTE);
     g_action_cb = subghz_save_action;
+    mascot_play(lv_scr_act(), MASCOT_MISA, LV_ALIGN_BOTTOM_MID, false);
   }
 }
 
@@ -761,15 +821,16 @@ static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
     make_label(p, "DEMO CAPTURE", &lv_font_unscii_8, C_AMBER);
     make_label(p, "0x0015F3 (24-bit)", &lv_font_montserrat_20, C_TXT);
     make_label(p, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
-    g_sub_status = make_label(p, "ACTION = save to /subghz", &lv_font_unscii_8, C_GREEN_SFT);
+    g_sub_status = make_label(p, "ACTION = save to /subghz", &lv_font_unscii_8, C_ACCENT_SFT);
     make_label(box, "ACTION saves .sub -> SD    click = replay", &lv_font_unscii_8, C_MUTE);
     g_action_cb = subghz_save_action;
     return;
   }
   
-  make_label(p, "LISTENING 433.92", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "LISTENING 433.92", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "press a fob near the antenna", &lv_font_montserrat_16, C_TXT);
   ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
+  mascot_play(p, MASCOT_L, LV_ALIGN_TOP_RIGHT, true);
   make_label(box, "rotate = band    click = replay", &lv_font_unscii_8, C_MUTE);
   
   g_cleanup_cb = subghz_cleanup;
@@ -781,11 +842,11 @@ static void tool_ism(lv_obj_t *box) {            // Sub-GHz > ISM decoder
   lv_obj_t *p = panel(box);
   uint32_t code = 0x00FF0F; int bits = 24;       // demo captured gate code
   char tri[16]; pt2262_tristate(code, bits, tri);
-  make_label(p, "433 ISM DECODER", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "433 ISM DECODER", &lv_font_unscii_8, C_ACCENT);
   char h[40]; snprintf(h, sizeof h, "0x%06lX  (%d bit)", (unsigned long)code, bits);
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
   char t[24]; snprintf(t, sizeof t, "PT2262: %s", tri);
-  make_label(p, t, &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(p, t, &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(p, pt2262_is_valid(tri) ? "valid tri-state frame" : "not PT2262",
              &lv_font_montserrat_14, C_SUB);
   make_label(box, "gate/garage remotes - CC1101 RX bring-up",
@@ -821,7 +882,7 @@ static void tool_mifare(lv_obj_t *box) {         // RFID/NFC > Mifare crack
   char h[48]; snprintf(h, sizeof h, "%d built-in + %d SD keys", MIFARE_KEY_COUNT, sdkeys);
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
   char k[48]; snprintf(k, sizeof k, "sec 0 KeyA: %s", mifare_key_name(found));
-  make_label(p, k, &lv_font_unscii_8, C_GREEN_SFT);
+  make_label(p, k, &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(p, "tries default keys per sector", &lv_font_montserrat_14, C_SUB);
   make_label(box, "PN532 authenticate loop = bring-up", &lv_font_unscii_8, C_MUTE);
 }
@@ -833,7 +894,7 @@ static void tool_amiibo(lv_obj_t *box) {         // RFID/NFC > Amiibo clone
   d[AMIIBO_ID_OFF + 7] = 0x02;
   char id[17]; amiibo_id_hex(d, id);
   bool ok = ntag215_is_amiibo(d, sizeof d);
-  make_label(p, ok ? "NTAG215 AMIIBO" : "NOT AMIIBO", &lv_font_unscii_8, C_GREEN);
+  make_label(p, ok ? "NTAG215 AMIIBO" : "NOT AMIIBO", &lv_font_unscii_8, C_ACCENT);
   make_label(p, id, &lv_font_montserrat_20, C_TXT);
   make_label(p, "figure id (page 21)", &lv_font_montserrat_14, C_SUB);
   make_label(p, "demo - PN532 dump/write = bring-up", &lv_font_montserrat_14, C_AMBER);
@@ -861,7 +922,7 @@ static void tool_emv(lv_obj_t *box) {            // RFID/NFC > Bank card read
                          card_network(pan), yymm[2], yymm[3], yymm[0], yymm[1]);
   make_label(p, sub, &lv_font_montserrat_14, C_SUB);
   make_label(p, luhn_valid(pan) ? "Luhn OK  -  demo card" : "invalid",
-             &lv_font_montserrat_14, C_GREEN_SFT);
+             &lv_font_montserrat_14, C_ACCENT_SFT);
   make_label(box, "public data only - PN532 APDU = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
@@ -878,6 +939,34 @@ static void nfc_save_action() {
     lv_label_set_text(g_nfc_status, (path && path[0]) ? path : "no SD card");
 }
 
+static void tool_nfc_read(lv_obj_t *box);
+
+// nfc_begin() only ever ran once, in setup() -- if the PN532 handshake lost
+// the race at boot, this screen was stuck saying "not detected" until a
+// reboot even though the chip answers fine on a live I2C scan. ACTION here
+// re-runs the real init and repaints, same pattern as the Bus Pirate rescan.
+static void nfc_retry_action() {
+  bool ok = nfc_begin();
+  Serial.printf("[nfc] retry: PN532 %s\n", ok ? "present" : "absent");
+  if (!g_nfc_box) return;
+  lv_obj_clean(g_nfc_box);
+  g_nfc_panel = nullptr;
+  tool_nfc_read(g_nfc_box);
+}
+
+// No ACTION button wired yet on this build -- retry on a timer too, so the
+// screen self-heals the moment the PN532 answers without needing any input.
+static void nfc_retry_poll_cb(lv_timer_t *t) {
+  if (!nfc_begin()) return;
+  Serial.println("[nfc] auto-retry: PN532 present");
+  lv_timer_del(t);
+  g_tool_timer = nullptr;
+  if (!g_nfc_box) return;
+  lv_obj_clean(g_nfc_box);
+  g_nfc_panel = nullptr;
+  tool_nfc_read(g_nfc_box);
+}
+
 static void nfc_poll_cb(lv_timer_t *t) {
   uint8_t uid[7], len = 0;
   if (nfc_read_uid(uid, &len)) {
@@ -885,13 +974,14 @@ static void nfc_poll_cb(lv_timer_t *t) {
     g_tool_timer = nullptr;
     lv_obj_clean(g_nfc_panel);
     nfc_uid_hex(uid, len, g_nfc_uid, sizeof g_nfc_uid);
-    make_label(g_nfc_panel, "CARD", &lv_font_unscii_8, C_GREEN);
+    make_label(g_nfc_panel, "CARD", &lv_font_unscii_8, C_ACCENT);
     make_label(g_nfc_panel, g_nfc_uid, &lv_font_montserrat_20, C_TXT);
     make_label(g_nfc_panel, len == 4 ? "Mifare Classic / NTAG" : "7-byte UID card",
                &lv_font_montserrat_14, C_SUB);
-    g_nfc_status = make_label(g_nfc_panel, "ACTION = save to /nfc", &lv_font_montserrat_14, C_GREEN_SFT);
+    g_nfc_status = make_label(g_nfc_panel, "ACTION = save to /nfc", &lv_font_montserrat_14, C_ACCENT_SFT);
     make_label(g_nfc_box, "ACTION saves UID    click = crack keys", &lv_font_unscii_8, C_MUTE);
     g_action_cb = nfc_save_action;
+    mascot_play(lv_scr_act(), MASCOT_MISA, LV_ALIGN_BOTTOM_MID, false);
   }
 }
 
@@ -903,11 +993,14 @@ static void tool_nfc_read(lv_obj_t *box) {       // RFID/NFC > Read / clone
     make_label(p, "NFC READ", &lv_font_unscii_8, C_AMBER);
     make_label(p, "PN532 not detected", &lv_font_montserrat_16, C_RED);
     make_label(p, "Check I2C wiring", &lv_font_montserrat_14, C_SUB);
+    make_label(box, "retrying every 1.5s - ACTION = retry now", &lv_font_unscii_8, C_MUTE);
+    g_action_cb = nfc_retry_action;
+    g_tool_timer = lv_timer_create(nfc_retry_poll_cb, 1500, NULL);
     return;
   }
-  make_label(p, "PN532 READY", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "PN532 READY", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "tap a card to the antenna", &lv_font_montserrat_16, C_TXT);
-  ui_anim_waves_create(p, 80, lv_color_hex(C_CYAN));
+  mascot_play(p, MASCOT_NFC_CARD, LV_ALIGN_CENTER, true, 350);
   g_tool_timer = lv_timer_create(nfc_poll_cb, 200, NULL);
 }
 
@@ -935,12 +1028,12 @@ static void wifi_poll_cb(lv_timer_t *t) {
   lv_obj_clean(g_wifi_panel);
   
   if (n <= 0) {
-    make_label(g_wifi_panel, "WIFI SCAN", &lv_font_unscii_8, C_GREEN);
+    make_label(g_wifi_panel, "WIFI SCAN", &lv_font_unscii_8, C_ACCENT);
     make_label(g_wifi_panel, "no networks found", &lv_font_montserrat_16, C_SUB);
     return;
   }
   char h[24]; snprintf(h, sizeof h, "%d networks", n);
-  make_label(g_wifi_panel, h, &lv_font_unscii_8, C_GREEN);
+  make_label(g_wifi_panel, h, &lv_font_unscii_8, C_ACCENT);
   int show = n < 5 ? n : 5;
   for (int i = 0; i < show; i++) {
     int enc = wifi_enc(i);
@@ -948,7 +1041,7 @@ static void wifi_poll_cb(lv_timer_t *t) {
     snprintf(line, sizeof line, "%s  %s  %d dBm", wifi_ssid(i), wifi_enc_str(enc), wifi_rssi(i));
     make_label(g_wifi_panel, line, &lv_font_montserrat_14, wifi_is_open(enc) ? C_RED : C_TXT);
   }
-  g_wifi_status = make_label(g_wifi_panel, "ACTION = save list to /wifi", &lv_font_unscii_8, C_GREEN_SFT);
+  g_wifi_status = make_label(g_wifi_panel, "ACTION = save list to /wifi", &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(g_wifi_box, "ACTION saves CSV    click = rescan", &lv_font_unscii_8, C_MUTE);
   g_action_cb = wifi_save_action;
 }
@@ -958,10 +1051,11 @@ static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
   g_wifi_panel = p;
   g_wifi_box = box;
   
-  make_label(p, "WIFI SCAN", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "WIFI SCAN", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "scanning 2.4GHz...", &lv_font_montserrat_16, C_TXT);
   ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
-  
+  mascot_play(p, MASCOT_L, LV_ALIGN_TOP_RIGHT, true);
+
   wifi_scan_async();
   g_tool_timer = lv_timer_create(wifi_poll_cb, 200, NULL);
 }
@@ -974,7 +1068,7 @@ static void tool_csi(lv_obj_t *box) {            // See invisible > See through 
   bool motion = csi_motion(win, 8, 5.0f);
   make_label(p, "SEE THROUGH WALL", &lv_font_unscii_8, C_CYAN);
   make_label(p, motion ? "MOTION DETECTED" : "room is still",
-             &lv_font_montserrat_20, motion ? C_RED : C_GREEN_SFT);
+             &lv_font_montserrat_20, motion ? C_RED : C_ACCENT_SFT);
   char h[40]; snprintf(h, sizeof h, "CSI variance %.0f", var);
   make_label(p, h, &lv_font_unscii_8, C_SUB);
   make_label(p, "ambient WiFi channel-state sensing", &lv_font_montserrat_14, C_SUB);
@@ -984,7 +1078,7 @@ static void tool_csi(lv_obj_t *box) {            // See invisible > See through 
 static void tool_df(lv_obj_t *box) {             // See invisible > Direction finder
   static int prev = -80;
   lv_obj_t *p = panel(box);
-  make_label(p, "DIRECTION FINDER", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "DIRECTION FINDER", &lv_font_unscii_8, C_ACCENT);
   if (!cc1101_present()) {
     make_label(p, "demo - CC1101 not detected", &lv_font_montserrat_16, C_AMBER);
     make_label(p, "433.92 MHz  -70 dBm  WARMER", &lv_font_montserrat_14, C_SUB);
@@ -994,7 +1088,7 @@ static void tool_df(lv_obj_t *box) {             // See invisible > Direction fi
   int t = df_trend(rssi, prev);
   prev = rssi;
   char h[40]; snprintf(h, sizeof h, "%d dBm  %s", rssi, df_label(t));
-  make_label(p, h, &lv_font_montserrat_20, t > 0 ? C_GREEN : t < 0 ? C_RED : C_TXT);
+  make_label(p, h, &lv_font_montserrat_20, t > 0 ? C_ACCENT : t < 0 ? C_RED : C_TXT);
   make_label(p, "walk around - click to sample", &lv_font_montserrat_14, C_SUB);
   make_label(box, "warmer = closer to the transmitter", &lv_font_unscii_8, C_MUTE);
 }
@@ -1013,7 +1107,7 @@ static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanne
   lv_obj_t *p = panel(box);
   bool live = nrf_present();
   if (live && !nrf_scanned()) nrf_scan();
-  make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, live ? C_GREEN : C_AMBER);
+  make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, live ? C_ACCENT : C_AMBER);
   g_nrf_lbl = make_label(p, "", &lv_font_montserrat_16, C_TXT);
   make_label(p, live ? "rotate to inspect a channel" : "demo - NRF24 not detected",
              &lv_font_montserrat_14, live ? C_SUB : C_AMBER);
@@ -1036,7 +1130,7 @@ static void tool_keysniff(lv_obj_t *box) {       // NRF24 / 2.4GHz > Keyboard sn
   make_label(p, "KEYBOARD SNIFF", &lv_font_unscii_8, C_AMBER);
   make_label(p, "log 2.4GHz keystrokes", &lv_font_montserrat_16, C_TXT);
   char h[32]; snprintf(h, sizeof h, "captured: %s", txt);
-  make_label(p, h, &lv_font_montserrat_20, C_GREEN_SFT);
+  make_label(p, h, &lv_font_montserrat_20, C_ACCENT_SFT);
   make_label(p, "unencrypted keyboards only", &lv_font_montserrat_14, C_AMBER);
   make_label(box, "nRF24 ESB sniff = bring-up - own gear only",
              &lv_font_unscii_8, C_MUTE);
@@ -1059,7 +1153,7 @@ static void tool_mousejack(lv_obj_t *box) {      // NRF24 / 2.4GHz > Mousejack
 static void tool_espnow(lv_obj_t *box) {         // Comms / Off-grid > ESP-NOW mesh
   if (!espnow_active()) espnow_begin();
   lv_obj_t *p = panel(box);
-  make_label(p, "ESP-NOW MESH", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "ESP-NOW MESH", &lv_font_unscii_8, C_ACCENT);
   char h[40]; snprintf(h, sizeof h, "%lu messages received", (unsigned long)espnow_rx());
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
   const char *last = espnow_last();
@@ -1074,26 +1168,26 @@ static void tool_usbhost(lv_obj_t *box) {        // Comms / Off-grid > USB host
   mbr[510] = 0x55; mbr[511] = 0xAA;
   uint8_t *e = mbr + MBR_PART0_OFF;
   e[4] = 0x0C; e[9] = 0x08; e[12] = 0x40; e[13] = 0x42; e[14] = 0x0F;
-  make_label(p, "USB HOST", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "USB HOST", &lv_font_unscii_8, C_ACCENT);
   make_label(p, mbr_valid(mbr) ? "drive mounted" : "no MBR",
              &lv_font_montserrat_16, C_TXT);
   char h[48]; snprintf(h, sizeof h, "P1 %s  %lu MB", mbr_part_type(e[4]),
                        (unsigned long)(mbr_part_sectors(e) / 2048));
   make_label(p, h, &lv_font_unscii_8, C_SUB);
-  make_label(p, "browse & copy files to SD", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, "browse & copy files to SD", &lv_font_montserrat_14, C_ACCENT_SFT);
   make_label(box, "USB MSC host enumeration = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
 static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
   lv_obj_t *p = panel(box);
   int pct = usage_pct(62, 100);                  // demo — real data via phone bridge
-  make_label(p, "CLAUDE USAGE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "CLAUDE USAGE", &lv_font_unscii_8, C_ACCENT);
   char h[16]; snprintf(h, sizeof h, "%d%% of 5h", pct);
-  make_label(p, h, &lv_font_montserrat_28, pct > 85 ? C_RED : C_GREEN);
+  make_label(p, h, &lv_font_montserrat_28, pct > 85 ? C_RED : C_ACCENT);
   lv_obj_t *bar = lv_bar_create(p);
   lv_obj_set_size(bar, lv_pct(100), 10);
   lv_obj_set_style_bg_color(bar, lv_color_hex(C_LINE), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(bar, lv_color_hex(C_GREEN), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(bar, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
   lv_bar_set_value(bar, pct, LV_ANIM_OFF);
   char r[24]; fmt_hms(12180, r, sizeof r);
   char line[40]; snprintf(line, sizeof line, "resets in %s", r);
@@ -1103,7 +1197,7 @@ static void tool_usage(lv_obj_t *box) {          // Me > Claude usage
 
 static void tool_tasks(lv_obj_t *box) {          // Me > Tasks
   lv_obj_t *p = panel(box);
-  make_label(p, "TASKS", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "TASKS", &lv_font_unscii_8, C_ACCENT);
   // Phone bridge writes /me/tasks.txt to SD; fall back to a demo list if absent.
   static char buf[1024];
   static const char *demo =
@@ -1135,7 +1229,7 @@ static void tool_tasks(lv_obj_t *box) {          // Me > Tasks
 
 static void tool_calendar(lv_obj_t *box) {       // Me > Calendar
   lv_obj_t *p = panel(box);
-  make_label(p, "CALENDAR", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "CALENDAR", &lv_font_unscii_8, C_ACCENT);
   // Phone bridge writes /me/calendar.txt ("<iCal-dt> <title>" per line) to SD.
   static char buf[512];
   char when[32], title[48];
@@ -1146,7 +1240,7 @@ static void tool_calendar(lv_obj_t *box) {       // Me > Calendar
     snprintf(title, sizeof title, "Team sync");
   }
   make_label(p, title, &lv_font_montserrat_20, C_TXT);
-  make_label(p, when, &lv_font_montserrat_16, C_GREEN_SFT);
+  make_label(p, when, &lv_font_montserrat_16, C_ACCENT_SFT);
   make_label(p, "next event", &lv_font_montserrat_14, C_SUB);
   make_label(box, sd ? "loaded /me/calendar.txt  (BLE sync = bring-up)"
                      : "demo - phone writes /me/calendar.txt (bring-up)",
@@ -1160,7 +1254,7 @@ static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
   make_label(p, "BADUSB / HID", &lv_font_unscii_8, C_RED);
   make_label(p, "acts as a USB keyboard", &lv_font_montserrat_16, C_TXT);
   make_label(p, "payload: STRING / GUI r / DELAY / ENTER", &lv_font_montserrat_14, C_SUB);
-  make_label(p, "load a .txt from SD, then run", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, "load a .txt from SD, then run", &lv_font_montserrat_14, C_ACCENT_SFT);
   make_label(box, "only on machines you own", &lv_font_unscii_8, C_MUTE);
 }
 
@@ -1174,7 +1268,7 @@ static void tool_hidattack(lv_obj_t *box) {      // BadUSB / HID > HID attacks
   make_label(p, "type any string as a keyboard", &lv_font_montserrat_16, C_TXT);
   char h[40]; snprintf(h, sizeof h, "\"%s\" -> %d HID keys", demo, ok);
   make_label(p, h, &lv_font_unscii_8, C_SUB);
-  make_label(p, "full ASCII incl. shifted symbols", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, "full ASCII incl. shifted symbols", &lv_font_montserrat_14, C_ACCENT_SFT);
   make_label(box, "only on machines you own - USB HID bring-up",
              &lv_font_unscii_8, C_MUTE);
 }
@@ -1189,7 +1283,7 @@ static void tvb_fire_action() {
 static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   // Info only — never blasts on screen build; firing is a deliberate ACTION step.
   lv_obj_t *p = panel(box);
-  make_label(p, "TV-B-GONE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "TV-B-GONE", &lv_font_unscii_8, C_ACCENT);
   char h[40]; snprintf(h, sizeof h, "%d TV power codes ready", tvb_count());
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
   make_label(p, "Samsung / LG / Sony / NEC / Philips", &lv_font_montserrat_14, C_SUB);
@@ -1226,11 +1320,11 @@ static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
   lv_obj_t *p = panel(box);
   int total = ir_brand_count() + AC_BRAND_COUNT;
   if (g_ir_brand < 0 || g_ir_brand >= total) g_ir_brand = 0;
-  make_label(p, "UNIVERSAL REMOTE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "UNIVERSAL REMOTE", &lv_font_unscii_8, C_ACCENT);
   g_ir_name_lbl = make_label(p, "", &lv_font_montserrat_20, C_TXT);
   g_ir_code_lbl = make_label(p, "", &lv_font_unscii_8, C_SUB);
   char n[40]; snprintf(n, sizeof n, "%d TV + %d A/C brands", ir_brand_count(), AC_BRAND_COUNT);
-  make_label(p, n, &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, n, &lv_font_montserrat_14, C_ACCENT_SFT);
   if (storage_ready()) {                          // plus any Flipper IRDB on SD
     char s[40]; snprintf(s, sizeof s, "+ SD IRDB: %d .ir files", storage_count_files("/ir", ".ir"));
     make_label(p, s, &lv_font_unscii_8, C_SUB);
@@ -1265,27 +1359,30 @@ static void ir_save_action() {
 static void ir_poll_cb(lv_timer_t *t) {
   uint8_t proto; uint64_t value; uint16_t bits;
   if (ir_learn(10, &proto, &value, &bits)) {
+    Serial.printf("[ir] captured proto=%u bits=%u value=0x%08llX\n",
+                  (unsigned)proto, (unsigned)bits, (unsigned long long)value);
     lv_timer_del(g_tool_timer);
     g_tool_timer = nullptr;
     lv_obj_clean(g_irl_panel);
     g_irl_proto = proto; g_irl_value = value; g_irl_bits = bits;
-    make_label(g_irl_panel, "CAPTURED", &lv_font_unscii_8, C_GREEN);
+    make_label(g_irl_panel, "CAPTURED", &lv_font_unscii_8, C_ACCENT);
     char h[40]; snprintf(h, sizeof h, "0x%08llX", (unsigned long long)value);
     make_label(g_irl_panel, h, &lv_font_montserrat_20, C_TXT);
     char sub[40]; snprintf(sub, sizeof sub, "proto %u  %u bits", (unsigned)proto, (unsigned)bits);
-    make_label(g_irl_panel, sub, &lv_font_montserrat_14, C_GREEN_SFT);
-    g_irl_status = make_label(g_irl_panel, "ACTION = save to /ir", &lv_font_unscii_8, C_GREEN_SFT);
+    make_label(g_irl_panel, sub, &lv_font_montserrat_14, C_ACCENT_SFT);
+    g_irl_status = make_label(g_irl_panel, "ACTION = save to /ir", &lv_font_unscii_8, C_ACCENT_SFT);
     g_action_cb = ir_save_action;
+    mascot_play(lv_scr_act(), MASCOT_MISA, LV_ALIGN_BOTTOM_MID, false);
   }
 }
 
 static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   lv_obj_t *p = panel(box);
   g_irl_panel = p;
-  make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "IR LEARN / BLAST", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "TX GPIO47   RX GPIO48", &lv_font_unscii_8, C_SUB);
   make_label(p, "aim any remote and press a button", &lv_font_montserrat_16, C_TXT);
-  ui_anim_radar_create(p, 60, lv_color_hex(C_GREEN_SFT));
+  mascot_play(p, MASCOT_IR_BEAM, LV_ALIGN_CENTER, true, 300);
   make_label(box, "ACTION saves .ir    click = blast", &lv_font_unscii_8, C_MUTE);
   g_action_cb = ir_save_action;
   g_tool_timer = lv_timer_create(ir_poll_cb, 100, NULL);
@@ -1303,12 +1400,12 @@ static void ble_poll_cb(lv_timer_t *t) {
   
   int n = ble_count();
   if (n <= 0) {
-    make_label(g_ble_panel, "BLE SCAN", &lv_font_unscii_8, C_GREEN);
+    make_label(g_ble_panel, "BLE SCAN", &lv_font_unscii_8, C_ACCENT);
     make_label(g_ble_panel, "nothing advertising nearby", &lv_font_montserrat_16, C_SUB);
     return;
   }
   char h[24]; snprintf(h, sizeof h, "%d devices", n);
-  make_label(g_ble_panel, h, &lv_font_unscii_8, C_GREEN);
+  make_label(g_ble_panel, h, &lv_font_unscii_8, C_ACCENT);
   int show = n < 5 ? n : 5;
   for (int i = 0; i < show; i++) {
     const char *nm = ble_name(i);
@@ -1326,10 +1423,11 @@ static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
   g_ble_panel = p;
   g_ble_box = box;
   
-  make_label(p, "BLE SCAN", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "BLE SCAN", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "scanning 3 seconds...", &lv_font_montserrat_16, C_TXT);
   ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
-  
+  mascot_play(p, MASCOT_L, LV_ALIGN_TOP_RIGHT, true);
+
   ble_scan_async(3);
   g_tool_timer = lv_timer_create(ble_poll_cb, 200, NULL);
 }
@@ -1355,7 +1453,7 @@ static void camera_poll_cb(lv_timer_t *t) {
   }
   if (cams == 0)
     make_label(g_camera_panel, n > 0 ? "no camera-like WiFi APs" : "scan failed",
-               &lv_font_montserrat_16, C_GREEN_SFT);
+               &lv_font_montserrat_16, C_ACCENT_SFT);
 }
 
 static void tool_camera(lv_obj_t *box) {         // Am I safe? > Hidden camera
@@ -1378,7 +1476,7 @@ static void tool_deauth(lv_obj_t *box) {         // Am I safe? > Deauth detector
   make_label(p, "DEAUTH DETECTOR", &lv_font_unscii_8, C_CYAN);
   uint32_t hits = deauth_count();
   char h[40]; snprintf(h, sizeof h, "%lu deauth frames seen", (unsigned long)hits);
-  make_label(p, h, &lv_font_montserrat_16, hits > 0 ? C_RED : C_GREEN_SFT);
+  make_label(p, h, &lv_font_montserrat_16, hits > 0 ? C_RED : C_ACCENT_SFT);
   make_label(p, hits > 0 ? "someone may be jamming WiFi near you" : "airwaves look clean",
              &lv_font_montserrat_14, C_SUB);
   make_label(box, "watching 802.11 management frames", &lv_font_unscii_8, C_MUTE);
@@ -1408,7 +1506,7 @@ static void tool_usbgag(lv_obj_t *box) {         // Pranks > USB gag
   lv_obj_t *p = panel(box);
   make_label(p, "USB GAG", &lv_font_unscii_8, C_RED);
   g_gag_name = make_label(p, "", &lv_font_montserrat_20, C_TXT);
-  g_gag_line = make_label(p, "", &lv_font_unscii_8, C_GREEN_SFT);
+  g_gag_line = make_label(p, "", &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(p, "harmless: opens a page / locks screen", &lv_font_montserrat_14, C_SUB);
   g_gag_status = make_label(box, "", &lv_font_unscii_8, C_MUTE);
   gag_paint(g_gag);
@@ -1425,21 +1523,21 @@ static void tool_rickroll(lv_obj_t *box) {       // Pranks > Rickroll tag
   uint8_t rec[80], tag[96];
   size_t rn = ndef_uri_record(url, rec, sizeof rec);
   size_t tn = ndef_tlv_wrap(rec, rn, tag, sizeof tag);
-  make_label(p, "RICKROLL TAG", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "RICKROLL TAG", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "write an NFC tag -> opens the song", &lv_font_montserrat_16, C_TXT);
   char h[40]; snprintf(h, sizeof h, "%u-byte NDEF tag ready", (unsigned)tn);
   make_label(p, h, &lv_font_unscii_8, C_SUB);
-  make_label(p, "tap a phone to it, watch the face", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, "tap a phone to it, watch the face", &lv_font_montserrat_14, C_ACCENT_SFT);
   make_label(box, "PN532 tag write = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
 static void tool_hackscreen(lv_obj_t *box) {     // Pranks > Hacker screen
   lv_obj_t *p = panel(box);
-  make_label(p, "ACCESS GRANTED", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "ACCESS GRANTED", &lv_font_unscii_8, C_ACCENT);
   uint32_t s = 0xC0FFEE;                          // static frames; animate = enhancement
   for (int i = 0; i < 3; i++) {
     char line[25]; hack_line(&s, line, 24);
-    make_label(p, line, &lv_font_unscii_8, C_GREEN_SFT);
+    make_label(p, line, &lv_font_unscii_8, C_ACCENT_SFT);
   }
   make_label(box, "fake movie hack - just for show", &lv_font_unscii_8, C_MUTE);
 }
@@ -1453,11 +1551,11 @@ static void tool_castcrash(lv_obj_t *box) {      // Pranks > Cast crasher
   char loc[96], st[96];
   ssdp_header(resp, "LOCATION", loc, sizeof loc);
   ssdp_header(resp, "ST", st, sizeof st);
-  make_label(p, "CAST CRASHER", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "CAST CRASHER", &lv_font_unscii_8, C_ACCENT);
   make_label(p, cast_kind(st), &lv_font_montserrat_20, C_TXT);
   make_label(p, "192.168.1.42:8008", &lv_font_unscii_8, C_SUB);
   make_label(p, "queue a video on nearby TVs (fun)",
-             &lv_font_montserrat_14, C_GREEN_SFT);
+             &lv_font_montserrat_14, C_ACCENT_SFT);
   make_label(box, "SSDP discovery + DIAL = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
@@ -1502,7 +1600,7 @@ static void audiobug_timer_cb(lv_timer_t * t) {
       make_label(p, h, &lv_font_montserrat_20, C_TXT);
       make_label(p, band ? band : "UNKNOWN BAND", &lv_font_montserrat_16, C_RED);
   } else {
-      make_label(p, "no covert bands active", &lv_font_montserrat_16, C_GREEN_SFT);
+      make_label(p, "no covert bands active", &lv_font_montserrat_16, C_ACCENT_SFT);
   }
   make_label(p, "FM / VHF / UHF / GSM / 2.4G", &lv_font_unscii_8, C_SUB);
   make_label(box, "Press action to sweep again", &lv_font_unscii_8, C_MUTE);
@@ -1546,7 +1644,7 @@ static void skimmer_timer_cb(lv_timer_t * t) {
       char h[40]; snprintf(h, sizeof h, "BLE name: \"%s\"", suspect);
       make_label(p, h, &lv_font_unscii_8, C_SUB);
   } else {
-      make_label(p, "no skimmer signatures", &lv_font_montserrat_16, C_GREEN_SFT);
+      make_label(p, "no skimmer signatures", &lv_font_montserrat_16, C_ACCENT_SFT);
       char h[40]; snprintf(h, sizeof h, "Scanned %d devices", count);
       make_label(p, h, &lv_font_unscii_8, C_SUB);
   }
@@ -1558,7 +1656,7 @@ static void tool_skimmer(lv_obj_t *box) {
   lv_obj_t *p = panel(box);
   make_label(p, "SKIMMER DETECTOR", &lv_font_unscii_8, C_CYAN);
   make_label(p, "Scanning BLE...", &lv_font_montserrat_16, C_TXT);
-  ui_anim_radar_create(p, 80, lv_color_hex(C_GREEN));
+  ui_anim_radar_create(p, 80, lv_color_hex(C_ACCENT));
   
   ble_scan_async(3);
   s_active_tool_timer = lv_timer_create(skimmer_timer_cb, 500, box);
@@ -1588,7 +1686,7 @@ static void droneid_timer_cb(lv_timer_t * t) {
       char h[48]; snprintf(h, sizeof h, "ID %s", suspect);
       make_label(p, h, &lv_font_unscii_8, C_SUB);
   } else {
-      make_label(p, "No drones detected", &lv_font_montserrat_16, C_GREEN_SFT);
+      make_label(p, "No drones detected", &lv_font_montserrat_16, C_ACCENT_SFT);
   }
   make_label(box, "Press action to sniff again", &lv_font_unscii_8, C_MUTE);
 }
@@ -1626,12 +1724,12 @@ static void tool_fwdump(lv_obj_t *box) {
   uint8_t jedec[3] = { (uint8_t)(id & 0xFF), (uint8_t)((id >> 8) & 0xFF), (uint8_t)((id >> 16) & 0xFF) };
   uint32_t bytes = jedec_capacity_bytes(jedec[2]);
 
-  make_label(p, "FIRMWARE DUMP", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "FIRMWARE DUMP", &lv_font_unscii_8, C_ACCENT);
   char id_str[40]; snprintf(id_str, sizeof id_str, "JEDEC %02X %02X %02X", jedec[0], jedec[1], jedec[2]);
   make_label(p, id_str, &lv_font_unscii_8, C_SUB);
   char h[48]; snprintf(h, sizeof h, "%s  -  %lu MB", jedec_manuf(jedec[0]), (unsigned long)(bytes / (1024 * 1024)));
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
-  make_label(p, "Internal Flash (ESP32)", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, "Internal Flash (ESP32)", &lv_font_montserrat_14, C_ACCENT_SFT);
   g_fwdump_status = make_label(box, "ACTION = dump first 64KB to SD", &lv_font_unscii_8, C_MUTE);
   g_action_cb = fwdump_action;
 }
@@ -1660,7 +1758,7 @@ static void gpio_toggle_action() {
 
 static void tool_gpio(lv_obj_t *box) {           // Tools > GPIO play
   lv_obj_t *p = panel(box);
-  make_label(p, "GPIO PLAY", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "GPIO PLAY", &lv_font_unscii_8, C_ACCENT);
   g_gpio_lbl = make_label(p, "", &lv_font_montserrat_20, C_TXT);
   make_label(p, "toggle HIGH/LOW, read state", &lv_font_montserrat_14, C_SUB);
   make_label(p, "flash/PSRAM pins 26-37 locked out", &lv_font_montserrat_14, C_AMBER);
@@ -1680,7 +1778,7 @@ static void i2c_scan_paint() {
   if (!g_i2c_panel) return;
   lv_obj_clean(g_i2c_panel);
   lv_obj_t *p = g_i2c_panel;
-  make_label(p, "I2C SCAN", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "I2C SCAN", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "live probe, 0x08-0x77", &lv_font_montserrat_16, C_TXT);
   uint8_t found[16]; int nfound = 0;
   for (uint8_t a = 0x08; a <= 0x77 && nfound < 16; a++) {
@@ -1696,7 +1794,7 @@ static void i2c_scan_paint() {
     make_label(p, h, &lv_font_unscii_8, C_SUB);
     for (int k = 0; k < nfound; k++) {
       const char *nm = i2c_device_name(found[k]);
-      if (nm) make_label(p, nm, &lv_font_montserrat_14, C_GREEN_SFT);
+      if (nm) make_label(p, nm, &lv_font_montserrat_14, C_ACCENT_SFT);
     }
   }
 }
@@ -1713,10 +1811,10 @@ static void tool_wardrive(lv_obj_t *box) {       // WiFi > Wardrive
   char row[128];
   wardrive_csv("A4:2B:B0:11:22:33", "linksys", "[WPA2-PSK-CCMP][ESS]",
                6, -52, 12.971600, 77.594600, row, sizeof row);
-  make_label(p, "WARDRIVE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "WARDRIVE", &lv_font_unscii_8, C_ACCENT);
   make_label(p, "log every AP + GPS -> SD (WiGLE)", &lv_font_montserrat_16, C_TXT);
   make_label(p, "1 net  -  fix 12.9716,77.5946", &lv_font_unscii_8, C_SUB);
-  make_label(p, "wardrive.csv ready to upload", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, "wardrive.csv ready to upload", &lv_font_montserrat_14, C_ACCENT_SFT);
   make_label(box, "needs GPS fix + SD - scan is bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
@@ -1731,7 +1829,7 @@ static void tool_handshake(lv_obj_t *box) {      // WiFi > Handshake / PMKID
                        got & 1 ? 'y' : '-', got & 2 ? 'y' : '-');
   make_label(p, h, &lv_font_unscii_8, C_SUB);
   make_label(p, crack ? "crackable - saved .pcap" : "waiting for handshake",
-             &lv_font_montserrat_14, crack ? C_GREEN_SFT : C_AMBER);
+             &lv_font_montserrat_14, crack ? C_ACCENT_SFT : C_AMBER);
   make_label(box, "deauth to force reconnect - own AP only",
              &lv_font_unscii_8, C_MUTE);
 }
@@ -1784,7 +1882,7 @@ static void tool_deauth_atk(lv_obj_t *box) {     // WiFi > Deauth (authorized)
 
 static void tool_ibutton(lv_obj_t *box) {        // RFID/NFC > iButton key
   lv_obj_t *p = panel(box);
-  make_label(p, "IBUTTON / 1-WIRE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "IBUTTON / 1-WIRE", &lv_font_unscii_8, C_ACCENT);
   uint8_t rom[8] = {0x01, 0x2A, 0x3B, 0x4C, 0x5D, 0x6E, 0x7F, 0x00};
   rom[7] = onewire_crc8(rom, 7);
   char h[48]; snprintf(h, sizeof h, "family 0x%02X  crc %s", rom[0],
@@ -1796,7 +1894,7 @@ static void tool_ibutton(lv_obj_t *box) {        // RFID/NFC > iButton key
 
 static void tool_transit(lv_obj_t *box) {        // RFID/NFC > Transit card
   lv_obj_t *p = panel(box);
-  make_label(p, "TRANSIT CARD", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "TRANSIT CARD", &lv_font_unscii_8, C_ACCENT);
   if (!nfc_present()) {
     make_label(p, "PN532 not detected", &lv_font_montserrat_16, C_RED);
     return;
@@ -1827,10 +1925,10 @@ static void tool_ndef(lv_obj_t *box) {           // RFID/NFC > Write NDEF tag
   uint8_t rec[64];
   size_t n = ndef_uri_record(url, rec, sizeof rec);
   g_ndef_tag_len = ndef_tlv_wrap(rec, n, g_ndef_tag, sizeof g_ndef_tag);
-  make_label(p, "WRITE NDEF TAG", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "WRITE NDEF TAG", &lv_font_unscii_8, C_ACCENT);
   make_label(p, url, &lv_font_montserrat_14, C_TXT);
   char h[40]; snprintf(h, sizeof h, "NDEF record ready: %u bytes", (unsigned)n);
-  make_label(p, h, &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, h, &lv_font_montserrat_14, C_ACCENT_SFT);
   g_ndef_status = make_label(p, nfc_present() ? "tap an NTAG, ACTION to write"
                                               : "PN532 not detected",
              &lv_font_montserrat_14, C_SUB);
@@ -1839,7 +1937,7 @@ static void tool_ndef(lv_obj_t *box) {           // RFID/NFC > Write NDEF tag
 
 static void tool_gatt(lv_obj_t *box) {           // Bluetooth > GATT explore
   lv_obj_t *p = panel(box);
-  make_label(p, "GATT EXPLORE", &lv_font_unscii_8, C_GREEN);
+  make_label(p, "GATT EXPLORE", &lv_font_unscii_8, C_ACCENT);
   // Demo: resolve a few common service UUIDs to names (real connect = bring-up).
   static const uint16_t demo[] = {0x1800, 0x180A, 0x180F, 0x180D};
   for (unsigned k = 0; k < sizeof(demo) / sizeof(demo[0]); k++) {
@@ -1865,7 +1963,7 @@ static void tool_wof(lv_obj_t *box) {            // Bluetooth > Wall of Flipper
   }
   if (gear == 0)
     make_label(p, n > 0 ? "no hacking gear nearby" : "scanning...",
-               &lv_font_montserrat_16, C_GREEN_SFT);
+               &lv_font_montserrat_16, C_ACCENT_SFT);
   make_label(box, "spots Flippers / pwnagotchis / Marauders", &lv_font_unscii_8, C_MUTE);
 }
 
@@ -1876,7 +1974,7 @@ static void tool_tracker_hunt(lv_obj_t *box) {   // Bluetooth > Tracker hunt
   make_label(p, "TRACKER HUNT", &lv_font_unscii_8, C_CYAN);
   make_label(p, "find AirTag / Tile / SmartTag", &lv_font_montserrat_16, C_TXT);
   char h[40]; snprintf(h, sizeof h, "nearest: %s", brand ? brand : "none");
-  make_label(p, h, &lv_font_montserrat_20, C_GREEN_SFT);
+  make_label(p, h, &lv_font_montserrat_20, C_ACCENT_SFT);
   make_label(p, "walk around - RSSI rises as you near it",
              &lv_font_montserrat_14, C_SUB);
   make_label(box, "BLE mfg-data scan = bring-up", &lv_font_unscii_8, C_MUTE);
@@ -1901,7 +1999,7 @@ static void tool_tracker(lv_obj_t *box) {        // Am I safe? > Tracker on me?
     }
   } else {
     make_label(p, n > 0 ? "No trackers following you" : "scanning...",
-               &lv_font_montserrat_16, C_GREEN_SFT);
+               &lv_font_montserrat_16, C_ACCENT_SFT);
   }
   make_label(box, "BLE sweep - camera/audio sweep next", &lv_font_montserrat_14, C_SUB);
 }
@@ -1916,7 +2014,7 @@ static void tool_generic(lv_obj_t *box, const Tool &t) {
   lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(b, 4, 0);
   lv_obj_set_style_pad_hor(b, 6, 0); lv_obj_set_style_pad_ver(b, 3, 0);
-  make_label(p, "> live data lands next milestone", &lv_font_montserrat_14, C_GREEN_SFT);
+  make_label(p, "> live data lands next milestone", &lv_font_montserrat_14, C_ACCENT_SFT);
 }
 
 static void build_tool(int c, int i) {
@@ -1930,6 +2028,10 @@ static void build_tool(int c, int i) {
   } else {
     tool_generic(box, t);
   }
+  if (t.kind == K_ATK) {   // brief flash-in: Light for "writing" tools, Ryuk otherwise
+    bool writes = strcmp(t.code, "DK") == 0 || strcmp(t.code, "HID") == 0;
+    mascot_play(scr, writes ? MASCOT_LIGHT : MASCOT_RYUK, LV_ALIGN_TOP_RIGHT, false);
+  }
   load_screen(scr);
 }
 
@@ -1938,7 +2040,7 @@ static void build_edit_bright() {
   section(scr, "ROTATE TO CHANGE - BACK TO SAVE");
   lv_obj_t *box = content_box(scr);
   lv_obj_t *p = panel(box);
-  g_edit_label = make_label(p, "", &lv_font_montserrat_28, C_GREEN);
+  g_edit_label = make_label(p, "", &lv_font_montserrat_28, C_ACCENT);
   lv_label_set_text_fmt(g_edit_label, "%d%%", g_bright_pct);
   make_label(p, "screen backlight", &lv_font_montserrat_14, C_SUB);
   make_label(box, "needs the BL mod to take effect", &lv_font_unscii_8, C_MUTE);
@@ -1953,7 +2055,7 @@ static void build_edit_power() {
   section(scr, "ROTATE: LOW / MED / MAX - BACK TO SAVE");
   lv_obj_t *box = content_box(scr);
   lv_obj_t *p = panel(box);
-  g_edit_label = make_label(p, pwr_name(g_power_lvl), &lv_font_montserrat_28, C_GREEN);
+  g_edit_label = make_label(p, pwr_name(g_power_lvl), &lv_font_montserrat_28, C_ACCENT);
   make_label(p, "TX power for every radio", &lv_font_montserrat_14, C_SUB);
   make_label(box, "Max can exceed local power limits", &lv_font_unscii_8, C_AMBER);
   load_screen(scr);
@@ -1962,23 +2064,143 @@ static void build_edit_power() {
   g_edit_cb = power_edit_cb;
 }
 
+// ---------------------------------------------------------------- splash
+static void splash_advance_cb(lv_timer_t *) {
+  if (lock_configured(&g_lock)) nav_lock(); else nav_home();
+}
+
+static void build_splash() {
+  lv_obj_t *scr = new_screen("");
+  lv_obj_t *box = content_box(scr);
+  lv_obj_t *wrap = plain(box);
+  lv_obj_set_size(wrap, lv_pct(100), lv_pct(100));
+  mascot_play(wrap, MASCOT_NOTEBOOK, LV_ALIGN_CENTER, true, 500);
+  lv_obj_t *title = make_label(wrap, "EDGEHAX S3-PRO", &lv_font_montserrat_20, C_ACCENT);
+  lv_obj_align(title, LV_ALIGN_BOTTOM_MID, 0, -6);
+  load_screen(scr);
+  lv_timer_t *t = lv_timer_create(splash_advance_cb, 1300, NULL);
+  lv_timer_set_repeat_count(t, 1);
+}
+
+// ---------------------------------------------------------------- lock screen
+// Shared by SCR_LOCK (boot/wake gate, g_locked=true, BACK/HOME disabled — see
+// poll_buttons) and SCR_SET_PIN (a normal Settings screen). Both dial a digit
+// via the existing encoder edit-mode and confirm it with ACTION, exactly like
+// brightness/intensity editing — no new input plumbing.
+static uint8_t g_lock_epoch = 0;   // bumped per build_lock(); guards a stale wrong-PIN timer
+
+static void lock_repaint_dots() {
+  for (int i = 0; i < 4; i++) {
+    if (!g_lock_dots[i]) continue;
+    bool filled = i < g_lock.pos;
+    lv_obj_set_style_bg_color(g_lock_dots[i], lv_color_hex(filled ? C_ACCENT : C_LINE), 0);
+    lv_obj_set_style_bg_opa(g_lock_dots[i], filled ? LV_OPA_COVER : LV_OPA_40, 0);
+  }
+  if (g_lock_digit_lbl) lv_label_set_text_fmt(g_lock_digit_lbl, "%d", g_lock_digit);
+}
+
+static void lock_dial_cb(int v) { g_lock_digit = v; lock_repaint_dots(); }
+
+static void lock_wrong_flash() {
+  for (int i = 0; i < 4; i++) {
+    if (!g_lock_dots[i]) continue;
+    lv_obj_set_style_bg_color(g_lock_dots[i], lv_color_hex(C_RED), 0);
+    lv_obj_set_style_bg_opa(g_lock_dots[i], LV_OPA_COVER, 0);
+  }
+}
+static void lock_wrong_reset_cb(lv_timer_t *t) {
+  if ((uint8_t)(intptr_t)t->user_data != g_lock_epoch) return;   // screen moved on already
+  lock_reset_entry(&g_lock);
+  lock_repaint_dots();
+}
+
+static void lock_check_or_save() {   // g_action_cb: confirms the dialled digit
+  lock_confirm_digit(&g_lock, g_lock_digit);
+  g_lock_digit = 0;
+  if (!lock_entry_complete(&g_lock)) { lock_repaint_dots(); return; }
+
+  if (g_lock_setting_new) {
+    int v = lock_pin_from_digits(g_lock.entry[0], g_lock.entry[1], g_lock.entry[2], g_lock.entry[3]);
+    g_lock.pin = (v == 0) ? -1 : v;      // 0000 removes the PIN
+    g_cfg_dirty = true;
+    lock_reset_entry(&g_lock);
+    lock_repaint_dots();
+    if (g_lock_status_lbl)
+      lv_label_set_text(g_lock_status_lbl, g_lock.pin < 0 ? "PIN removed" : "PIN set");
+    mascot_play(lv_scr_act(), MASCOT_MISA, LV_ALIGN_BOTTOM_MID, false);
+  } else if (lock_entry_matches(&g_lock)) {
+    g_locked = false;
+    nav_home();
+  } else {
+    mascot_play(lv_scr_act(), MASCOT_RYUK, LV_ALIGN_TOP_MID, false);
+    lock_wrong_flash();
+    lv_timer_t *t = lv_timer_create(lock_wrong_reset_cb, 350, (void *)(intptr_t)g_lock_epoch);
+    lv_timer_set_repeat_count(t, 1);
+  }
+}
+
+static void build_lock(bool setting_new) {
+  g_lock_epoch++;
+  g_lock_setting_new = setting_new;
+  lock_reset_entry(&g_lock);
+  g_lock_digit = 0;
+
+  lv_obj_t *scr = new_screen(setting_new ? "SET PIN" : "LOCKED");
+  lv_obj_t *box = content_box(scr);
+
+  lv_obj_t *hero = plain(box);
+  lv_obj_set_size(hero, lv_pct(100), 64);
+  lv_obj_t *l = mascot_play(hero, MASCOT_L, LV_ALIGN_CENTER, true, 260);
+  if (l) lv_img_set_zoom(l, 400);   // ~1.6x — hero-sized on the lock screen
+
+  lv_obj_t *p = panel(box);
+  lv_obj_t *dots = plain(p);
+  lv_obj_set_size(dots, lv_pct(100), 20);
+  lv_obj_set_flex_flow(dots, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(dots, 14, 0);
+  for (int i = 0; i < 4; i++) {
+    lv_obj_t *d = lv_obj_create(dots);
+    lv_obj_remove_style_all(d);
+    lv_obj_set_size(d, 14, 14);
+    lv_obj_set_style_radius(d, 7, 0);
+    lv_obj_set_style_border_width(d, 1, 0);
+    lv_obj_set_style_border_color(d, lv_color_hex(C_LINE), 0);
+    g_lock_dots[i] = d;
+  }
+  g_lock_digit_lbl = make_label(p, "0", &lv_font_montserrat_28, C_ACCENT);
+  g_lock_status_lbl = make_label(p, setting_new ? "0000 removes the PIN" : "enter PIN",
+                                 &lv_font_montserrat_14, C_SUB);
+  make_label(box, "rotate = digit    ACTION = confirm", &lv_font_unscii_8, C_MUTE);
+  load_screen(scr);
+
+  lock_repaint_dots();
+  g_edit_val = &g_lock_digit;
+  g_edit_min = 0; g_edit_max = 9; g_edit_step = 1;
+  g_edit_cb = lock_dial_cb;
+  g_action_cb = lock_check_or_save;
+}
+
 static void build_settings() {
   lv_obj_t *scr = new_screen("SETTINGS");
   lv_obj_t *list = make_list(scr);
   char buf[40];
   snprintf(buf, sizeof(buf), "%d %%  (rotate to change)", g_bright_pct);
-  add_row(list, "BRT", C_GREEN, "Brightness", buf, NULL, 0, 0, nav_code(SCR_EDIT_BRIGHT, 0, 0));
+  add_row(list, "BRT", C_ACCENT, "Brightness", buf, NULL, 0, 0, nav_code(SCR_EDIT_BRIGHT, 0, 0));
   snprintf(buf, sizeof(buf), "%s  (rotate to change)", pwr_name(g_power_lvl));
   add_row(list, "INT", C_AMBER, "Intensity", buf, NULL, 0, 0, nav_code(SCR_EDIT_POWER, 0, 0));
   snprintf(buf, sizeof(buf), "dim %ds  sleep %ds", DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000);
-  add_row(list, "PWR", C_GREEN, "Sleep timers", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
-  add_row(list, "THM", C_GREEN, "Theme", "phosphor green", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  add_row(list, "PWR", C_ACCENT, "Sleep timers", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  add_row(list, "THM", C_ACCENT, "Theme", "Death Note", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  add_row(list, "PIN", C_ACCENT, "PIN Lock",
+          lock_configured(&g_lock) ? "set - enter 0000 to remove" : "not set",
+          NULL, 0, 0, nav_code(SCR_SET_PIN, 0, 0));
   if (storage_ready())
     snprintf(buf, sizeof(buf), "SD %lu / %lu MB used", (unsigned long)storage_used_mb(),
              (unsigned long)storage_total_mb());
   else
     snprintf(buf, sizeof(buf), "no card - insert to save");
-  add_row(list, "SD", storage_ready() ? C_GREEN : C_SUB, "Storage", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  add_row(list, "SD", storage_ready() ? C_ACCENT : C_SUB, "Storage", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
   add_row(list, "?",   C_SUB,   "About", "Edgehax S3-PRO  -  fw m2", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
   load_screen(scr);
 }
@@ -1998,6 +2220,9 @@ static void render_top() {
     case SCR_SETTINGS:    build_settings();           break;
     case SCR_EDIT_BRIGHT: build_edit_bright();        break;
     case SCR_EDIT_POWER:  build_edit_power();         break;
+    case SCR_SPLASH:      build_splash();             break;
+    case SCR_LOCK:        build_lock(false);          break;
+    case SCR_SET_PIN:     build_lock(true);           break;
   }
 }
 static void nav_push(ScreenT t, int cat, int tool) {
@@ -2013,6 +2238,12 @@ static void nav_pop() {
 static void nav_home() {
   nav_depth = 1;
   nav_stack[0] = { SCR_HOME, 0, 0 };
+  render_top();
+}
+static void nav_lock() {                            // boot/wake gate — see poll_buttons
+  g_locked = true;
+  nav_depth = 1;
+  nav_stack[0] = { SCR_LOCK, 0, 0 };
   render_top();
 }
 static void on_action() {                          // context key
@@ -2037,7 +2268,7 @@ static void init_styles() {
 
   lv_style_init(&st_item_foc);
   lv_style_set_bg_color(&st_item_foc, lv_color_hex(C_CARD_FOC));
-  lv_style_set_border_color(&st_item_foc, lv_color_hex(C_GREEN));
+  lv_style_set_border_color(&st_item_foc, lv_color_hex(C_ACCENT));
   lv_style_set_border_width(&st_item_foc, 2);
 
   lv_style_init(&st_chip);
@@ -2084,14 +2315,15 @@ void setup() {
   // compile-time for now). Falls back to defaults when no card / no file.
   char cfgline[72];
   if (storage_load_config(cfgline, sizeof cfgline)) {
-    DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl};
+    DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl, g_lock.pin};
     cfg_parse(cfgline, &cfg);
     g_bright_pct = cfg.bright < 10 ? 10 : cfg.bright > 100 ? 100 : cfg.bright;
     apply_brightness(g_bright_pct);
     g_power_lvl = pwr_clamp(cfg.power);
     set_power_level(g_power_lvl);
-    Serial.printf("[cfg] restored brightness %d%%, intensity %s\n",
-                  g_bright_pct, pwr_name(g_power_lvl));
+    g_lock.pin = cfg.pin;
+    Serial.printf("[cfg] restored brightness %d%%, intensity %s, pin %s\n",
+                  g_bright_pct, pwr_name(g_power_lvl), lock_configured(&g_lock) ? "set" : "none");
   }
 
   cc1101_begin();
@@ -2150,12 +2382,13 @@ void setup() {
   lv_timer_create(poll_buttons, 30, NULL);      // button poll (also updates click)
 
   last_input_ms = millis();
-  nav_home();                                   // build the first screen
+  nav_push(SCR_SPLASH, 0, 0);                   // boot splash -> lock (if a PIN is set) or home
   Serial.println("[ui] home ready");
 }
 
 void loop() {
   lv_timer_handler();
   pm_tick();
+  enc_rearm_tick();
   delay(5);
 }
