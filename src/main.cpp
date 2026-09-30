@@ -490,6 +490,18 @@ static void nav_pop();
 static void nav_home();
 static void on_action();
 
+// Buzzer + motor were wired (BOM, pins.h) but never driven — every physical
+// press felt dead with zero confirmation it registered. A buzzer tick is
+// instant (no mechanical ramp-up); the motor's left for a later, bigger-
+// moment pulse (card read, capture saved) since a coin motor likely needs
+// longer than a click-length pulse to be felt — unverified without hardware.
+static void click_tick() {
+  if (!mcp_ok) return;
+  mcp.digitalWrite(MCP_BUZZER, HIGH);
+  delay(8);
+  mcp.digitalWrite(MCP_BUZZER, LOW);
+}
+
 static void lock_repaint_dots();               // fwd (defined near build_lock)
 static void poll_buttons(lv_timer_t *) {
   if (!mcp_ok) return;
@@ -497,7 +509,7 @@ static void poll_buttons(lv_timer_t *) {
   uint8_t edges   = pressed & ~btn_prev;         // rising (newly pressed)
   btn_prev = pressed;
   g_enc_pressed = pressed & (1 << MCP_ENC_SW);
-  if (edges) pm_wake();
+  if (edges) { pm_wake(); click_tick(); }
   if (g_locked) {                                // lock screen owns BACK/HOME;
     if (edges & ((1 << MCP_BTN_BACK) | (1 << MCP_BTN_HOME))) {
       lock_reset_entry(&g_lock);
@@ -2429,6 +2441,7 @@ void setup() {
     mcp.setupInterrupts(true, false, LOW);      // mirror, push-pull, active-low
     for (uint8_t p = 0; p <= MCP_ENC_SW; p++) mcp.setupInterruptPin(p, CHANGE);
     pinMode(PIN_MCP_INT, INPUT_PULLUP);
+    mcp.pinMode(MCP_BUZZER, OUTPUT); mcp.digitalWrite(MCP_BUZZER, LOW);   // click feedback
     Serial.println("[ui] MCP23017 ok — buttons live");
   } else {
     Serial.println("[ui] MCP23017 NOT found — encoder rotate only until wired");
