@@ -64,3 +64,70 @@ a small dedicated FreeRTOS task pinned to core 0 that owns the SPI-B radio sweep
 globals (`s_counts`/`s_scanned`), polled by the UI's `lv_timer`. That removes the
 scan latency from the UI task entirely instead of just chunking it.
 **Effort:** M
+
+## 2026-10-02
+
+### 1. A corrupted/out-of-range `pin=` in config.txt can permanently brick the PIN lock
+**File/function:** `src/config.h` (`cfg_parse`/`cfg_int_after`), consumed unchecked at
+`src/main.cpp:2406` (`setup()`'s config-restore block); compared in `src/ui_lock.h`
+(`lock_entry_matches`/`lock_pin_from_digits`)
+`cfg_int_after` reads the `pin=` value out of `/config.txt` with plain `atoi` and no
+range check. `setup()` loads it straight into `g_lock.pin = cfg.pin;` with no
+clamping (unlike `g_bright_pct`, which is clamped to 10-100 two lines above, and
+`g_power_lvl`, which goes through `pwr_clamp`). `lock_configured()` only checks
+`pin >= 0`, so any out-of-range value (e.g. a flipped bit making `pin=99999` or
+`pin=10000`) is accepted as "configured". But `lock_pin_from_digits` can only ever
+produce 0-9999 from the 4-digit keypad entry in `lock_entry_matches`, so a PIN
+outside that range can never be matched by any real keypad entry — the owner is
+locked out of their own device until they pull the SD card and hand-edit/delete
+`config.txt`. Fix: clamp `cfg.pin` to `-1` or `0..9999` (same pattern already used
+for brightness/power) before assigning it to `g_lock.pin`.
+**Effort:** S
+
+### 2. DuckyScript "load a .txt from SD" is advertised but never implemented — only canned gag lines run
+**File/function:** `src/main.cpp:1282` (`tool_badusb`), `src/badusb.cpp:33`
+(`badusb_run_line`), `src/ducky.h` (`ducky_parse`)
+`tool_badusb`'s screen text literally says "load a .txt from SD, then run", but a
+repo-wide search shows `ducky_parse()` has exactly one caller — `badusb_run_line`
+in `src/badusb.cpp` — and `badusb_run_line` itself is only ever invoked from
+`src/main.cpp:1530` with a fixed line out of the built-in `GAGS[]` table
+(`src/gags.h`), inside `tool_usbgag`/`tool_badusb`'s own ACTION handler. There is
+no code path anywhere that opens an actual SD file (e.g. under `/ducky`), reads it
+line-by-line, and feeds each line through `badusb_run_line`/`ducky_parse` — the
+one advertised "real" payload feature of BadUSB/HID is entirely absent; only the
+canned pranks in `gags.h` work. Fix: add a `/ducky/*.txt` file picker (same shape
+as the existing SD-backed tools) that streams each line through the existing,
+already-tested `ducky_parse`/`badusb_run_line` pair.
+**Effort:** M
+
+### 3. `src/main.cpp` has grown to 2483 lines holding every screen, tool handler, and state machine
+**File/function:** `src/main.cpp` (whole file — ~60 `tool_*` render functions,
+`build_tool`/`build_screen`/nav plus the PM/lock/encoder state machines all in one
+translation unit)
+The file mixes unrelated concerns with no internal split: screen/nav plumbing
+(`build_tool`, `new_screen`, `load_screen`), the power-management state machine
+(`pm_tick`/`pm_wake`), the lock screen glue, the encoder ISR, and all ~60 per-tool
+render callbacks (`tool_wifi_scan`, `tool_mifare`, `tool_badusb`, etc.) are one
+5700-line-project's single largest file by a factor of 15 over the next largest
+(`src/flipper_ir.h` at 107 lines). That makes the diff surface for any one-tool
+change (like items 1-2 above and the 2026-10-01 entries) touch a file every
+other change also touches, and makes it hard to see which `tool_*` functions are
+missing their `lv_timer_create` poll pattern at a glance. Fix: split per-category
+render functions out into `src/screens_<category>.cpp` (wifi, nfc, subghz, nrf24,
+badusb, etc.), keeping `main.cpp` to `setup()`/`loop()`, nav, and the PM/lock
+state machines.
+**Effort:** L
+
+### 4. `ui_lock.h`'s PIN state machine has no host unit test despite being pure logic
+**File/function:** `src/ui_lock.h` (`lock_confirm_digit`, `lock_entry_matches`,
+`lock_pin_from_digits`, `lock_configured`) — no `test/test_ui_lock.cpp`
+`ui_lock.h`'s own header comment says it's "host-testable, no LVGL/Arduino
+dependency", the same claim every other pure-logic header in `src/` makes, and
+every one of those (`config.h` → `test/test_config.cpp`, `df_logic.h` →
+`test/test_df_logic.cpp`, `ac_state.h` → `test/test_ac_state.cpp`, etc.) has a
+matching host test — `ui_lock.h` is the one exception. It's also the file that
+would have caught item 1 above: a test asserting `lock_entry_matches` can never
+be true for `pin` outside `0..9999` (or for `pin == -1`) would have surfaced the
+missing clamp at the `cfg_parse` call site. Fix: add `test/test_ui_lock.cpp`
+covering digit entry/reset/match, including the out-of-range-`pin` case.
+**Effort:** S
