@@ -39,5 +39,14 @@ int main() {
   // Overflow guard.
   assert(cfg_serialize(&a, buf, 4) == 0 && buf[0] == 0);
   assert(!cfg_parse(nullptr, &a));
+
+  // cfg_parse is intentionally a faithful atoi, no clamping -- an out-of-range
+  // pin= must come through exactly as written. The invariant that stops this
+  // becoming a lockout lives in ui_lock.h's lock_configured(), enforced by the
+  // caller (main.cpp setup()) before the value is ever acted on -- see
+  // test_ui_lock.cpp and main.cpp's restore block.
+  DeviceCfg f = {80, 20, 35, 0, 2, -1};
+  cfg_parse("pin=99999", &f);
+  assert(f.pin == 99999);
   return 0;
 }

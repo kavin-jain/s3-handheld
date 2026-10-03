@@ -12,7 +12,16 @@ struct LockState {
   int pos;       // 0..4; 4 = all digits entered, ready to check
 };
 
-static inline bool lock_configured(const LockState *s) { return s->pin >= 0; }
+// A configured PIN is always 0-9999 (the only range 4 real keypad digits can
+// ever produce, via lock_pin_from_digits). Enforced here, not at each call site,
+// so a corrupt/out-of-range value loaded from anywhere can never be treated as
+// "configured" -- it would otherwise be an unmatchable PIN, i.e. a permanent
+// self-lockout. See src/config.h's cfg_parse (no clamp there -- parsing is meant
+// to be faithful) and main.cpp's setup() restore block (resets an out-of-range
+// loaded value to -1, loud in the serial log, rather than guessing a "real" PIN).
+static inline bool lock_configured(const LockState *s) {
+  return s->pin >= 0 && s->pin <= 9999;
+}
 
 static inline void lock_reset_entry(LockState *s) {
   s->pos = 0;

@@ -2403,6 +2403,11 @@ void setup() {
     apply_brightness(g_bright_pct);
     g_power_lvl = pwr_clamp(cfg.power);
     set_power_level(g_power_lvl);
+    if (cfg.pin != -1 && (cfg.pin < 0 || cfg.pin > 9999)) {
+      Serial.printf("[cfg] pin=%d in config.txt is out of range (0-9999) -- "
+                    "resetting to unlocked instead of an unmatchable PIN\n", cfg.pin);
+      cfg.pin = -1;
+    }
     g_lock.pin = cfg.pin;
     Serial.printf("[cfg] restored brightness %d%%, intensity %s, pin %s\n",
                   g_bright_pct, pwr_name(g_power_lvl), lock_configured(&g_lock) ? "set" : "none");
