@@ -98,7 +98,11 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 ## BadUSB / Pranks (USB-OTG HID)
 - ☐ USB gag: pick a gag with the encoder, plug into a host, press ACTION — badusb_run_line
       types the DuckyScript line (Rickroll URL / GUI r / Lock screen). Own machines only.
-- ☐ DuckyScript: load a .txt payload from SD and run it; keystrokes land on the host.
+- ☐ DuckyScript: drop a payload .txt under /ducky, rotate to pick it, ACTION runs
+      it (storage_nth_file + badusb_run_line, wired this pass -- previously the
+      screen advertised this but nothing in the firmware actually opened an SD
+      file). Confirm keystrokes land on the host and multi-line payloads
+      (STRING/DELAY/ENTER/GUI sequences) run in order, not just a single line.
 
 ## Max-power config (green-zone attacks run the radios at their hardware limit)
 - ☐ CC1101 setPA(12) = +12 dBm on the async TX (replay). Confirm range vs default.

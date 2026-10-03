@@ -1302,15 +1302,56 @@ static void tool_calendar(lv_obj_t *box) {       // Me > Calendar
              &lv_font_unscii_8, C_MUTE);
 }
 
+static int       g_ducky_idx = 0;        // which /ducky/*.txt is selected
+static lv_obj_t *g_ducky_name_lbl = nullptr;
+
+static void ducky_paint(int idx) {
+  if (!g_ducky_name_lbl) return;
+  const char *path = storage_nth_file("/ducky", ".txt", idx);
+  const char *base = path;
+  for (const char *p = path; *p; p++) if (*p == '/') base = p + 1;
+  lv_label_set_text(g_ducky_name_lbl, base[0] ? base : "?");
+}
+
+// ACTION runs the selected file -- the one real payload path this screen
+// advertised ("load a .txt from SD, then run") but never implemented: there
+// was no code anywhere that opened an SD file and fed it through the already-
+// tested ducky_parse/badusb_run_line pair, only the canned gags.h lines
+// (tool_usbgag) actually ran. badusb_run_line already calls ducky_parse
+// itself per line, same as every other caller of it.
+static void ducky_run_action() {
+  const char *path = storage_nth_file("/ducky", ".txt", g_ducky_idx);
+  if (!path[0]) return;
+  static char text[2048];
+  if (!storage_read_file(path, text, sizeof text)) return;
+  badusb_begin();
+  for (const char *line = text; line && *line; ) {
+    badusb_run_line(line);
+    const char *nl = line; while (*nl && *nl != '\n') nl++;
+    line = (*nl == '\n') ? nl + 1 : nullptr;
+  }
+}
+
 static void tool_badusb(lv_obj_t *box) {         // BadUSB / HID > DuckyScript
-  // Info only — never auto-runs a payload on screen build (that would type into
-  // whatever's plugged in). Running is a deliberate ACTION-key step (next iter).
   lv_obj_t *p = panel(box);
+  int n = storage_ready() ? storage_count_files("/ducky", ".txt") : 0;
+  if (g_ducky_idx < 0 || g_ducky_idx >= n) g_ducky_idx = 0;
   make_label(p, "BADUSB / HID", &lv_font_unscii_8, C_RED);
   make_label(p, "acts as a USB keyboard", &lv_font_montserrat_16, C_TXT);
   make_label(p, "payload: STRING / GUI r / DELAY / ENTER", &lv_font_montserrat_14, C_SUB);
-  make_label(p, "load a .txt from SD, then run", &lv_font_montserrat_14, C_ACCENT_SFT);
-  make_label(box, "only on machines you own", &lv_font_unscii_8, C_MUTE);
+  g_ducky_name_lbl = make_label(p, "", &lv_font_montserrat_16, C_ACCENT_SFT);
+  if (n > 0) {
+    ducky_paint(g_ducky_idx);
+    make_label(box, "rotate = pick file   ACTION = run   only on machines you own",
+               &lv_font_unscii_8, C_MUTE);
+    g_edit_val = &g_ducky_idx;
+    g_edit_min = 0; g_edit_max = n - 1; g_edit_step = 1;
+    g_edit_cb = ducky_paint;
+    g_action_cb = ducky_run_action;
+  } else {
+    lv_label_set_text(g_ducky_name_lbl, "no .txt files on /ducky");
+    make_label(box, "drop a payload .txt under /ducky on SD", &lv_font_unscii_8, C_MUTE);
+  }
 }
 
 static void tool_hidattack(lv_obj_t *box) {      // BadUSB / HID > HID attacks
