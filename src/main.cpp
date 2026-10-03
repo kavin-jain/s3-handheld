@@ -110,6 +110,7 @@
 
 // ---------------------------------------------------------------- display glue
 #include "bus_locks.h"
+#include "radio_task.h"
 #include "ui_anim.h"
 #include "ui_mascot.h"
 #include "ui_lock.h"
@@ -1135,15 +1136,28 @@ static void nrf_paint(int ch) {
                         busiest ? "   <busiest>" : "");
 }
 
+// The sweep itself runs on the radio task (radio_task.h), not here -- this
+// just polls the same cached nrf_scanned()/s_counts[] the encoder-edit path
+// already reads, same shape as wifi_poll_cb/ble_poll_cb.
+static void nrf_scan_poll_cb(lv_timer_t *t) {
+  if (!nrf_scanned()) return;
+  lv_timer_del(g_tool_timer);
+  g_tool_timer = nullptr;
+  nrf_paint(g_nrf_ch);
+}
+
 static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanner
   lv_obj_t *p = panel(box);
   bool live = nrf_present();
-  if (live && !nrf_scanned()) nrf_scan();
   make_label(p, "2.4GHz SCAN", &lv_font_unscii_8, live ? C_ACCENT : C_AMBER);
   g_nrf_lbl = make_label(p, "", &lv_font_montserrat_16, C_TXT);
   make_label(p, live ? "rotate to inspect a channel" : "demo - NRF24 not detected",
              &lv_font_montserrat_14, live ? C_SUB : C_AMBER);
   make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
+  if (live && !nrf_scanned()) {
+    nrf_scan_request();
+    g_tool_timer = lv_timer_create(nrf_scan_poll_cb, 50, NULL);
+  }
   nrf_paint(g_nrf_ch);
   // Live-select: rotary walks the 126 nRF channels, flags the busiest.
   g_edit_val = &g_nrf_ch;
@@ -2367,6 +2381,7 @@ void setup() {
   esp_task_wdt_init(WDT_TIMEOUT_S, true);   // panic+reboot on a genuine hang
   esp_task_wdt_add(NULL);                   // watch this task (loop())
   bus_locks_init();
+  radio_task_start();   // owns every blocking SPI-B sweep from here on -- radio_task.h
 
   // De-assert all SPI CS pins so uninitialized modules don't corrupt the buses
   pinMode(PIN_SD_CS, OUTPUT); digitalWrite(PIN_SD_CS, HIGH);

@@ -1,5 +1,4 @@
 #include "radio_cc1101.h"
-#include "subghz_classify.h"
 #include "subghz_replay.h"
 #include "power_ctl.h"
 #include "power_level.h"
@@ -40,15 +39,6 @@ int cc1101_rssi_at(float mhz) {
   int rssi = ELECHOUSE_cc1101.getRssi();
   if (spi_b_mutex) xSemaphoreGiveRecursive(spi_b_mutex);
   return rssi;
-}
-
-int cc1101_sweep(const float *freqs, int n, int *rssi_out) {
-  if (!s_present || !freqs || !rssi_out || n <= 0) return -1;
-  if (spi_b_mutex) xSemaphoreTakeRecursive(spi_b_mutex, portMAX_DELAY);
-  for (int i = 0; i < n; i++) rssi_out[i] = cc1101_rssi_at(freqs[i]);
-  ELECHOUSE_cc1101.setSidle();                // park the radio after the sweep
-  if (spi_b_mutex) xSemaphoreGiveRecursive(spi_b_mutex);
-  return sg_peak(rssi_out, n);
 }
 
 // ---- Fixed-code capture & replay (async OOK) ---------------------------------

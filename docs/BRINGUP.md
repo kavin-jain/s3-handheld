@@ -44,6 +44,11 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 
 ## NRF24 (2×NRF24, SPI-B) — add 10 µF caps first
 - ☐ Band scanner shows 2.4 GHz activity.
+- ☐ Band scanner's sweep now runs on a dedicated core-0 task (radio_task.h/.cpp)
+      instead of inline on the UI task — confirm the UI (encoder, animation) stays
+      responsive during the ~104ms sweep, and that spi_b_mutex genuinely serializes
+      the radio task against any other SPI-B access under real preemption (this
+      repo's prior single-task cooperative access never exercised that).
 - ☐ Mousejack: sniff a dongle address, nrf_mousejack_inject a mousejack_stream payload,
       verify keystrokes land in a text editor on the paired host (own gear only).
 - ☐ Keyboard sniff decodes real keystrokes from an unencrypted 2.4 GHz kbd.

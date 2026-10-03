@@ -61,6 +61,14 @@ bool    nrf_scanned() { return s_scanned; }
 int     nrf_busiest_ch() { return nrf_busiest(s_counts, NRF_CHAN); }
 uint8_t nrf_activity(int ch) { return (ch >= 0 && ch < NRF_CHAN) ? s_counts[ch] : 0; }
 
+static volatile bool s_scan_requested = false;
+void nrf_scan_request() { s_scan_requested = true; }
+void nrf_scan_service() {
+  if (!s_scan_requested) return;
+  s_scan_requested = false;
+  nrf_scan();
+}
+
 // Transmit a mousejack keystroke stream at a sniffed dongle address. Frames are
 // built host-side by mousejack_stream(). ESB, no ACK, paced like a real dongle.
 // Bring-up: needs the nRF24, a sniffed address + channel, and an own/authorized
