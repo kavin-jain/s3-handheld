@@ -784,21 +784,31 @@ static void build_category(int c) {
   load_screen(scr);
 }
 
-// interpretation card used by the "Around me" showcase
+// interpretation card used by the "Around me" showcase. Every card used to
+// nav_code(SCR_HOME,0,0) regardless of what it described -- this is the
+// first screen a new user opens from Home, its cards say "tap to see who is
+// here" / "track?", and tapping any of them just dumped you back to Home.
+// Worse than a no-op: it actively navigates somewhere unrelated to the copy.
 static void around_card(lv_obj_t *list, const char *chip, uint32_t chip_fg,
                         const char *title, const char *sub,
-                        const char *badge, uint32_t bfg, uint32_t bbg) {
-  add_row(list, chip, chip_fg, title, sub, badge, bfg, bbg, nav_code(SCR_HOME, 0, 0));
+                        const char *badge, uint32_t bfg, uint32_t bbg,
+                        intptr_t dest) {
+  add_row(list, chip, chip_fg, title, sub, badge, bfg, bbg, dest);
 }
 static void build_around() {
   lv_obj_t *scr = new_screen("AROUND ME");
   section(scr, "5 THINGS - THE REAL FREQ IS ON EACH CARD");
   lv_obj_t *list = make_list(scr);
-  around_card(list, "RF",  C_RED,   "Car key fob",   "433.92 MHz  rolling code", "no copy", C_RED,  C_RED_BG);
-  around_card(list, "RF",  C_ACCENT, "Gate remote",   "433.92 MHz  fixed code",   "copy",    C_ACCENT,C_CHIP);
-  around_card(list, "IR",  C_AMBER, "Samsung TV",    "infrared  ready",          "control", C_ACCENT,C_CHIP);
-  around_card(list, "WiFi",C_ACCENT, "5 nets 9 devices","tap to see who is here", "explore", C_ACCENT,C_CHIP);
-  around_card(list, "BLE", C_CYAN,  "AirTag nearby", "seen 3x  moving with you", "track?",  C_CYAN, C_CYAN_BG);
+  around_card(list, "RF",  C_RED,   "Car key fob",   "433.92 MHz  rolling code", "no copy", C_RED,  C_RED_BG,
+              nav_code(SCR_TOOL, 0, 1));   // Sub-GHz > Capture & replay
+  around_card(list, "RF",  C_ACCENT, "Gate remote",   "433.92 MHz  fixed code",   "copy",    C_ACCENT,C_CHIP,
+              nav_code(SCR_TOOL, 0, 1));   // Sub-GHz > Capture & replay
+  around_card(list, "IR",  C_AMBER, "Samsung TV",    "infrared  ready",          "control", C_ACCENT,C_CHIP,
+              nav_code(SCR_TOOL, 2, 0));   // Infrared > Universal remote
+  around_card(list, "WiFi",C_ACCENT, "5 nets 9 devices","tap to see who is here", "explore", C_ACCENT,C_CHIP,
+              nav_code(SCR_TOOL, 3, 0));   // WiFi > Scan / recon
+  around_card(list, "BLE", C_CYAN,  "AirTag nearby", "seen 3x  moving with you", "track?",  C_CYAN, C_CYAN_BG,
+              nav_code(SCR_TOOL, 4, 2));   // Bluetooth > Tracker hunt
   load_screen(scr);
 }
 
@@ -1327,6 +1337,17 @@ static void tool_mousejack(lv_obj_t *box) {      // NRF24 / 2.4GHz > Mousejack
              &lv_font_unscii_8, C_MUTE);
 }
 
+static lv_obj_t *g_espnow_status = nullptr;
+
+// click = broadcast ping: espnow_broadcast() (espnow_mesh.cpp) was fully
+// implemented and never called from anywhere -- this is a real, live
+// feature (no extra hardware -- ESP-NOW is native to the chip) that was
+// receive-only in the UI because nothing dispatched the encoder click.
+static void espnow_ping_action() {
+  espnow_broadcast("ping");
+  if (g_espnow_status) lv_label_set_text(g_espnow_status, "ping sent");
+}
+
 static void tool_espnow(lv_obj_t *box) {         // Comms / Off-grid > ESP-NOW mesh
   if (!espnow_active()) espnow_begin();
   lv_obj_t *p = panel(box);
@@ -1335,7 +1356,9 @@ static void tool_espnow(lv_obj_t *box) {         // Comms / Off-grid > ESP-NOW m
   make_label(p, h, &lv_font_montserrat_16, C_TXT);
   const char *last = espnow_last();
   make_label(p, last[0] ? last : "(no messages yet)", &lv_font_montserrat_14, C_SUB);
+  g_espnow_status = make_label(p, "", &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(box, "router-free - click to broadcast ping", &lv_font_unscii_8, C_MUTE);
+  g_click_cb = espnow_ping_action;
 }
 
 static void tool_usbhost(lv_obj_t *box) {        // Comms / Off-grid > USB host
@@ -1610,6 +1633,16 @@ static void ir_save_action() {
     lv_label_set_text(g_irl_status, (path && path[0]) ? path : "no SD card");
 }
 
+// click = blast: this screen's own name is "Learn & blast" but nothing ever
+// called ir_send() -- the half the name promises didn't exist. ir_send()
+// already does exactly this ("re-blast a learned frame", ir_remote.h) and
+// no-ops safely if the IR TX never came up (s_ready false), same shape as
+// subghz_replay_action()'s hardware check.
+static void ir_blast_learned_action() {
+  bool ok = ir_send(g_irl_proto, g_irl_value, g_irl_bits);
+  if (g_irl_status) lv_label_set_text(g_irl_status, ok ? "blasted" : "IR TX not ready");
+}
+
 static void ir_poll_cb(lv_timer_t *t) {
   uint8_t proto; uint64_t value; uint16_t bits;
   if (ir_learn(10, &proto, &value, &bits)) {
@@ -1626,6 +1659,7 @@ static void ir_poll_cb(lv_timer_t *t) {
     make_label(g_irl_panel, sub, &lv_font_montserrat_14, C_ACCENT_SFT);
     g_irl_status = make_label(g_irl_panel, "ACTION = save to /ir", &lv_font_unscii_8, C_ACCENT_SFT);
     g_action_cb = ir_save_action;
+    g_click_cb = ir_blast_learned_action;
     mascot_play(lv_scr_act(), MASCOT_MISA, LV_ALIGN_BOTTOM_MID, false);
   }
 }
@@ -1637,8 +1671,11 @@ static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
   make_label(p, "TX GPIO47   RX GPIO48", &lv_font_unscii_8, C_SUB);
   make_label(p, "aim any remote and press a button", &lv_font_montserrat_16, C_TXT);
   mascot_play(p, MASCOT_IR_BEAM, LV_ALIGN_CENTER, true, 300);
+  g_irl_status = make_label(p, "click = blast the last-learned code (demo NEC until you learn one)",
+                            &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(box, "ACTION saves .ir    click = blast", &lv_font_unscii_8, C_MUTE);
   g_action_cb = ir_save_action;
+  g_click_cb = ir_blast_learned_action;
   g_tool_timer = lv_timer_create(ir_poll_cb, 100, NULL);
 }
 
@@ -1886,11 +1923,25 @@ static void tool_audiobug(lv_obj_t *box) {
   g_cleanup_cb = tool_timer_cleanup;
 }
 
+static lv_obj_t *g_skimmer_box = nullptr;
+static void tool_skimmer(lv_obj_t *box);
+// ACTION = rescan, as the screen's own text already claimed -- nothing ever
+// dispatched it. tool_timer_cleanup() first: s_active_tool_timer was only
+// ever paused (not deleted) once a scan completed, so re-entering without
+// this would leak one LVGL timer per rescan (overwriting the pointer that
+// was the only reference to it).
+static void skimmer_rescan_action() {
+  if (!g_skimmer_box) return;
+  tool_timer_cleanup();
+  lv_obj_clean(g_skimmer_box);
+  tool_skimmer(g_skimmer_box);
+}
+
 static void skimmer_timer_cb(lv_timer_t * t) {
   lv_obj_t *box = (lv_obj_t *)t->user_data;
   if (!ble_scan_complete()) return;
   lv_timer_pause(t);
-  
+
   int count = ble_count();
   const char* suspect = NULL;
   for (int i=0; i<count; i++) {
@@ -1899,7 +1950,7 @@ static void skimmer_timer_cb(lv_timer_t * t) {
          break;
      }
   }
-  
+
   lv_obj_clean(box);
   lv_obj_t *p = panel(box);
   make_label(p, "SKIMMER DETECTOR", &lv_font_unscii_8, C_CYAN);
@@ -1914,24 +1965,36 @@ static void skimmer_timer_cb(lv_timer_t * t) {
   }
   make_label(p, "generic BT modules used by skimmers", &lv_font_montserrat_14, C_SUB);
   make_label(box, "Press action to scan again", &lv_font_unscii_8, C_MUTE);
+  g_action_cb = skimmer_rescan_action;
 }
 
 static void tool_skimmer(lv_obj_t *box) {
+  g_skimmer_box = box;
   lv_obj_t *p = panel(box);
   make_label(p, "SKIMMER DETECTOR", &lv_font_unscii_8, C_CYAN);
   make_label(p, "Scanning BLE...", &lv_font_montserrat_16, C_TXT);
   ui_anim_radar_create(p, 80, lv_color_hex(C_ACCENT));
-  
+
   ble_scan_async(3);
   s_active_tool_timer = lv_timer_create(skimmer_timer_cb, 500, box);
   g_cleanup_cb = tool_timer_cleanup;
+}
+
+static lv_obj_t *g_droneid_box = nullptr;
+static void tool_droneid(lv_obj_t *box);
+// Same dead-ACTION bug as the skimmer detector just above, same fix.
+static void droneid_rescan_action() {
+  if (!g_droneid_box) return;
+  tool_timer_cleanup();
+  lv_obj_clean(g_droneid_box);
+  tool_droneid(g_droneid_box);
 }
 
 static void droneid_timer_cb(lv_timer_t * t) {
   lv_obj_t *box = (lv_obj_t *)t->user_data;
   if (!ble_scan_complete()) return;
   lv_timer_pause(t);
-  
+
   int count = ble_count();
   const char* suspect = NULL;
   for (int i=0; i<count; i++) {
@@ -1941,7 +2004,7 @@ static void droneid_timer_cb(lv_timer_t * t) {
          break;
      }
   }
-  
+
   lv_obj_clean(box);
   lv_obj_t *p = panel(box);
   make_label(p, "DRONE SPOTTER", &lv_font_unscii_8, C_CYAN);
@@ -1953,14 +2016,16 @@ static void droneid_timer_cb(lv_timer_t * t) {
       make_label(p, "No drones detected", &lv_font_montserrat_16, C_ACCENT_SFT);
   }
   make_label(box, "Press action to sniff again", &lv_font_unscii_8, C_MUTE);
+  g_action_cb = droneid_rescan_action;
 }
 
 static void tool_droneid(lv_obj_t *box) {
+  g_droneid_box = box;
   lv_obj_t *p = panel(box);
   make_label(p, "DRONE SPOTTER", &lv_font_unscii_8, C_CYAN);
   make_label(p, "Sniffing airspace...", &lv_font_montserrat_16, C_TXT);
   ui_anim_radar_create(p, 80, lv_color_hex(C_CYAN));
-  
+
   ble_scan_async(5);
   s_active_tool_timer = lv_timer_create(droneid_timer_cb, 500, box);
   g_cleanup_cb = tool_timer_cleanup;

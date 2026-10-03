@@ -9,6 +9,12 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 ## Phase 0 — board alive
 - ☐ Flashes and boots over native USB-CDC; serial prints `[ui] home ready`.
 - ☐ TFT renders the black/green home screen, no tearing.
+- ☐ "Around me" showcase (first screen off Home): all 5 cards used to navigate to
+      Home regardless of what they described -- worse than a dead tap, since their
+      own copy ("tap to see who is here", "track?") actively promised something else.
+      Each now points at the real matching screen (car key fob/gate remote -> Sub-GHz
+      Capture&replay, Samsung TV -> IR Universal remote, WiFi card -> WiFi scan,
+      AirTag -> BLE Tracker hunt). Confirm each tap actually lands where it claims.
 - ☐ Encoder rotates the selection smoothly (tune `ENC_STEPS_PER_DETENT` if double/half steps).
 - ☐ I2C scan finds MCP23017 @0x20, GY-87/MPU6050 @0x68, PN532 @0x24.
 - ☐ BACK / HOME / ACTION buttons + encoder click navigate.
@@ -62,6 +68,12 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
       blast needs IRremoteESP8266's IRac class, not implemented in this
       firmware yet -- ACTION's temp-bump display is the only A/C interaction
       that currently does anything.
+- ☐ Learn & blast: "click = blast" was pure text, same gap as the universal
+      remote had -- ir_send(proto, value, bits) ("re-blast a learned frame",
+      ir_remote.h) already existed fully implemented and was never called.
+      Wired now, both before any learn (blasts the demo NEC default) and
+      after a real capture. Confirm a learned remote's code actually blasts
+      back correctly on real hardware -- ir_send() itself is still unverified.
 - ☐ IRDB from SD: drop CC0 Flipper-IRDB .ir files under /ir; the universal
       remote now lists them after the TV/AC brands and click = blast sends
       each file's first parsed record via flipper_ir_at + ir_send_flipper
@@ -71,11 +83,12 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 - ☐ The encoder-click dispatch itself (g_click_cb in main.cpp's poll_buttons) is new
       wiring with no hardware behind it yet -- confirm a real encoder click actually
       fires it (vs. e.g. bouncing/double-firing against the existing button-tick buzzer
-      feedback). Now wired on 8 screens total, not just IR: Frequency finder (lock),
+      feedback). Now wired on 10 screens total, not just IR: Frequency finder (lock),
       Capture&replay (replay), Direction finder (resample), NFC Read/clone (crack-keys
       nav), WiFi scan (rescan, both the found-networks and no-networks-found branches),
-      BLE scan (rescan, both branches), NRF24 band scanner (rescan). Every one of these
-      previously had "click = X" in its own help text with nothing behind it --
+      BLE scan (rescan, both branches), NRF24 band scanner (rescan), IR Learn&blast
+      (blast), ESP-NOW mesh (broadcast ping). Every one of these previously had
+      "click = X" in its own help text with nothing behind it --
       poll_buttons simply never dispatched the encoder-click edge to anything before this
       session. Confirm each one on real hardware, not just the one IR click tested so far.
 
@@ -113,9 +126,14 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 
 ## Counter-surveillance ("Am I safe?")
 - ☐ Hidden-camera / audio-bug sweep flags a live transmitter in a covert band.
-- ☐ Skimmer detector flags a planted HC-05 near a reader.
+- ☐ Skimmer detector flags a planted HC-05 near a reader. "Press action to scan
+      again" was dead -- ACTION wasn't wired at all. Fixed; also deletes the
+      previous scan's paused LVGL timer before starting a new one (it was only
+      ever paused, never deleted, so repeated rescans without this would leak
+      one timer object each, permanently, until reboot).
 - ☐ Deauth detector counts frames during a test deauth.
-- ☐ Drone spotter decodes a real OpenDroneID beacon (operator id + GPS).
+- ☐ Drone spotter decodes a real OpenDroneID beacon (operator id + GPS). Same
+      dead-ACTION bug and same fix as the skimmer detector just above.
 
 ## WiFi — extras
 - ☐ Handshake: capture M1-M4 to a .pcap on SD; hashcat cracks a known PSK.
@@ -127,7 +145,11 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 - ☐ GPIO play toggles a usable pin; refuses reserved 26-37.
 
 ## Comms / Me
-- ☐ ESP-NOW mesh exchanges a message with a second unit.
+- ☐ ESP-NOW mesh exchanges a message with a second unit. espnow_broadcast() was
+      fully implemented (espnow_mesh.cpp) and never called -- this is real, live,
+      no-extra-hardware functionality that was receive-only in the UI purely
+      because the encoder click was never wired. click = broadcast ping now
+      actually sends. Confirm two units actually exchange a ping/receive it.
 - ☐ Phone BLE bridge feeds usage / calendar (iCal) / tasks to the device.
 - ☐ Me → Calendar/Tasks: drop /me/calendar.txt ("<iCal-dt> <title>" lines) and /me/tasks.txt
       ("[ ] !N text") on SD; screens render them (ical_next_event / task_parse), demo if absent.
