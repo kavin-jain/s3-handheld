@@ -13,10 +13,23 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 - ☐ I2C scan finds MCP23017 @0x20, GY-87/MPU6050 @0x68, PN532 @0x24.
 - ☐ BACK / HOME / ACTION buttons + encoder click navigate.
 - ☐ Vibration motor + buzzer fire (MCP GPA6 / GPA5).
+- ☐ Settings screen: Theme/Storage/About rows no longer push a no-op nav_stack frame on
+      click (were wired to nav_push(SCR_SETTINGS,...), i.e. "navigate" to the screen
+      already on screen -- invisible, but it silently consumed a BACK press per tap).
+      They're NAV_NONE now. Confirm BACK from Settings always returns home in one press
+      regardless of which rows were tapped first.
 
 ## Power
 - ☐ Backlight LED rewired off 3V3 → GPIO46 via MOSFET (else dimming is a no-op).
 - ☐ Idle → dims at ~20 s, screen off + light-sleep at ~35 s, any input wakes instantly.
+      Both now Settings > Dim timer / Sleep timer (SCR_EDIT_DIM/SCR_EDIT_SLEEP, g_dim_s/
+      g_sleep_s) instead of the DIM_AFTER_MS/SLEEP_AFTER_MS #defines -- those two screens
+      previously didn't exist; "Sleep timers" in Settings showed the compile-time values
+      but rotating/clicking it did nothing (nav_push'd to the Settings screen already on
+      screen). Confirm rotating each actually changes when dim/sleep kick in on real
+      hardware, and that sleep_s is kept 5s+ above dim_s (enforced in dim_edit_cb/
+      sleep_edit_cb, main.cpp) rather than letting pm_tick's two sequential idle checks
+      fire the same tick.
 - ☐ Measure real current (USB meter) in active / dim / sleep; log mA for the 10 h math.
 
 ## Sub-GHz (2×CC1101, SPI-B)
@@ -139,5 +152,9 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 - ☐ SD mounts; captures write to /subghz /nfc /ir /wifi and reload.
 - ☐ Save N captures of one kind: filenames increment (0000,0001,...) with no overwrite
       (next_seq scans the folder once via sp_parse_seq; verify e.name() is basename-or-path safe).
-- ☐ Settings persist: change brightness, reboot, value restored from /config.txt (config.h round-trip).
+- ☐ Settings persist: change brightness, reboot, value restored from /config.txt (config.h
+      round-trip). Now also dim/sleep timers -- config.h always serialized/parsed dim=/
+      sleep=, but main.cpp discarded the parsed value and re-wrote the DIM_AFTER_MS/
+      SLEEP_AFTER_MS #defines on every save; a changed timer silently reverted on reboot.
+      g_dim_s/g_sleep_s are the real runtime values now. Confirm both round-trip too.
 - ☐ Sub-GHz capture: press ACTION, a .sub file appears in /subghz and the path shows on screen.

@@ -300,7 +300,8 @@ static const uint8_t N_CATS = sizeof(CATS) / sizeof(CATS[0]);
 
 // ---------------------------------------------------------------- nav + input
 enum ScreenT : uint8_t { SCR_HOME, SCR_AROUND, SCR_CATEGORY, SCR_TOOL, SCR_SETTINGS,
-                         SCR_EDIT_BRIGHT, SCR_EDIT_POWER, SCR_SPLASH, SCR_LOCK, SCR_SET_PIN };
+                         SCR_EDIT_BRIGHT, SCR_EDIT_POWER, SCR_SPLASH, SCR_LOCK, SCR_SET_PIN,
+                         SCR_EDIT_DIM, SCR_EDIT_SLEEP };
 struct NavEntry { ScreenT t; int8_t cat; int8_t tool; };
 static NavEntry nav_stack[8];
 static uint8_t  nav_depth = 0;
@@ -344,6 +345,13 @@ static void bl_write(uint8_t duty) {
 // moving list focus. Cleared on every screen change (render_top).
 static int  g_bright_pct = 100;
 static int  g_power_lvl = PWR_MAX;              // global intensity (scales radio TX power)
+// Idle -> dim -> sleep timers (seconds). Config round-trip (config.h) already
+// serializes/parses dim=/sleep=, but nothing ever read the parsed value back
+// into anything pm_tick() looks at -- it read the DIM_AFTER_MS/SLEEP_AFTER_MS
+// #defines directly, so Settings "saved" a value every boot that could never
+// actually change behavior. These are the real runtime values now.
+static int  g_dim_s   = DIM_AFTER_MS / 1000;
+static int  g_sleep_s = SLEEP_AFTER_MS / 1000;
 static int *g_edit_val = nullptr;
 static int  g_edit_min, g_edit_max, g_edit_step;
 static void (*g_edit_cb)(int) = nullptr;
@@ -391,7 +399,7 @@ static void apply_brightness(int pct) {
 // Settings persistence: serialise current prefs to /config.txt (see config.h).
 static bool g_cfg_dirty = false;
 static void save_config_now() {
-  DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl, g_lock.pin};
+  DeviceCfg cfg = {g_bright_pct, g_dim_s, g_sleep_s, 0, g_power_lvl, g_lock.pin};
   char line[72];
   if (cfg_serialize(&cfg, line, sizeof line)) storage_save_config(line);
 }
@@ -410,6 +418,20 @@ static void power_edit_cb(int lvl) {
   if (lvl == PWR_MAX) mascot_play(lv_scr_act(), MASCOT_RYUK, LV_ALIGN_TOP_RIGHT, false);
 }
 
+// Dim/sleep must stay strictly ordered (pm_tick checks dim first, then sleep,
+// against the same idle clock) -- enforce it at the one place either value
+// can change, not by re-deriving it everywhere pm_tick is read.
+static void dim_edit_cb(int s) {
+  if (g_sleep_s <= g_dim_s) g_sleep_s = g_dim_s + 5;
+  if (g_edit_label) lv_label_set_text_fmt(g_edit_label, "%d s", s);
+  g_cfg_dirty = true;
+}
+static void sleep_edit_cb(int s) {
+  if (s <= g_dim_s) { g_sleep_s = g_dim_s + 5; s = g_sleep_s; }
+  if (g_edit_label) lv_label_set_text_fmt(g_edit_label, "%d s", s);
+  g_cfg_dirty = true;
+}
+
 static void nav_lock();
 static void pm_wake() {                        // -> ACTIVE (called on any input)
   last_input_ms = millis();
@@ -426,12 +448,12 @@ static void pm_wake() {                        // -> ACTIVE (called on any input
 
 static void pm_tick() {
   uint32_t idle = millis() - last_input_ms;
-  if (pm_state == PM_ACTIVE && idle > DIM_AFTER_MS) {
+  if (pm_state == PM_ACTIVE && idle > (uint32_t)g_dim_s * 1000) {
     bl_write(DIM_DUTY);
     setCpuFrequencyMhz(80);
     pm_state = PM_DIM;
     Serial.println("[pm] dim");
-  } else if (pm_state == PM_DIM && idle > SLEEP_AFTER_MS) {
+  } else if (pm_state == PM_DIM && idle > (uint32_t)g_sleep_s * 1000) {
     Serial.println("[pm] sleep (screen off; turn/press to wake)");
     Serial.flush();
     bl_write(0);
@@ -610,8 +632,16 @@ static void build_statusbar(lv_obj_t *scr, const char *title) {
 }
 
 // a focusable row: [chip] title / sub .......... [chevron], click -> nav dest
+// Info-only rows (About, Storage, Theme — nothing to navigate to) used to be
+// wired to nav_push(SCR_SETTINGS,...), i.e. "navigate" to the screen already
+// on screen: invisible to look at, but it silently pushed a real entry onto
+// nav_stack every tap. BACK then had to pop that no-op frame before doing
+// anything visible, making BACK feel broken after browsing Settings. Rows
+// that mean it pass NAV_NONE instead; item_clicked_cb no-ops on it.
+static const intptr_t NAV_NONE = -1;
 static void item_clicked_cb(lv_event_t *e) {
   intptr_t code = (intptr_t)lv_event_get_user_data(e);
+  if (code == NAV_NONE) return;
   nav_push((ScreenT)((code >> 16) & 0xFF), (code >> 8) & 0xFF, code & 0xFF);
 }
 static void focus_scroll_cb(lv_event_t *e) {
@@ -688,6 +718,8 @@ static void build_tool(int c, int i);
 static void build_settings();
 static void build_edit_bright();
 static void build_edit_power();
+static void build_edit_dim();
+static void build_edit_sleep();
 static void build_splash();
 static void build_lock(bool setting_new);
 
@@ -2341,6 +2373,36 @@ static void build_edit_power() {
   g_edit_cb = power_edit_cb;
 }
 
+static void build_edit_dim() {
+  lv_obj_t *scr = new_screen("DIM TIMER");
+  section(scr, "ROTATE TO CHANGE - BACK TO SAVE");
+  lv_obj_t *box = content_box(scr);
+  lv_obj_t *p = panel(box);
+  g_edit_label = make_label(p, "", &lv_font_montserrat_28, C_ACCENT);
+  lv_label_set_text_fmt(g_edit_label, "%d s", g_dim_s);
+  make_label(p, "idle time before the backlight dims", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "sleep timer stays 5s+ after this", &lv_font_unscii_8, C_MUTE);
+  load_screen(scr);
+  g_edit_val = &g_dim_s;
+  g_edit_min = 5; g_edit_max = 120; g_edit_step = 5;
+  g_edit_cb = dim_edit_cb;
+}
+
+static void build_edit_sleep() {
+  lv_obj_t *scr = new_screen("SLEEP TIMER");
+  section(scr, "ROTATE TO CHANGE - BACK TO SAVE");
+  lv_obj_t *box = content_box(scr);
+  lv_obj_t *p = panel(box);
+  g_edit_label = make_label(p, "", &lv_font_montserrat_28, C_ACCENT);
+  lv_label_set_text_fmt(g_edit_label, "%d s", g_sleep_s);
+  make_label(p, "idle time (after dim) before screen off", &lv_font_montserrat_14, C_SUB);
+  make_label(box, "any input wakes instantly", &lv_font_unscii_8, C_MUTE);
+  load_screen(scr);
+  g_edit_val = &g_sleep_s;
+  g_edit_min = g_dim_s + 5; g_edit_max = 300; g_edit_step = 5;
+  g_edit_cb = sleep_edit_cb;
+}
+
 // ---------------------------------------------------------------- splash
 static void splash_advance_cb(lv_timer_t *) {
   if (lock_configured(&g_lock)) nav_lock(); else nav_home();
@@ -2466,9 +2528,11 @@ static void build_settings() {
   add_row(list, "BRT", C_ACCENT, "Brightness", buf, NULL, 0, 0, nav_code(SCR_EDIT_BRIGHT, 0, 0));
   snprintf(buf, sizeof(buf), "%s  (rotate to change)", pwr_name(g_power_lvl));
   add_row(list, "INT", C_AMBER, "Intensity", buf, NULL, 0, 0, nav_code(SCR_EDIT_POWER, 0, 0));
-  snprintf(buf, sizeof(buf), "dim %ds  sleep %ds", DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000);
-  add_row(list, "PWR", C_ACCENT, "Sleep timers", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
-  add_row(list, "THM", C_ACCENT, "Theme", "Death Note", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  snprintf(buf, sizeof(buf), "%d s  (rotate to change)", g_dim_s);
+  add_row(list, "DIM", C_ACCENT, "Dim timer", buf, NULL, 0, 0, nav_code(SCR_EDIT_DIM, 0, 0));
+  snprintf(buf, sizeof(buf), "%d s  (rotate to change)", g_sleep_s);
+  add_row(list, "SLP", C_ACCENT, "Sleep timer", buf, NULL, 0, 0, nav_code(SCR_EDIT_SLEEP, 0, 0));
+  add_row(list, "THM", C_ACCENT, "Theme", "Death Note (only theme)", NULL, 0, 0, NAV_NONE);
   add_row(list, "PIN", C_ACCENT, "PIN Lock",
           lock_configured(&g_lock) ? "set - enter 0000 to remove" : "not set",
           NULL, 0, 0, nav_code(SCR_SET_PIN, 0, 0));
@@ -2477,8 +2541,8 @@ static void build_settings() {
              (unsigned long)storage_total_mb());
   else
     snprintf(buf, sizeof(buf), "no card - insert to save");
-  add_row(list, "SD", storage_ready() ? C_ACCENT : C_SUB, "Storage", buf, NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
-  add_row(list, "?",   C_SUB,   "About", "Edgehax S3-PRO  -  fw m2", NULL, 0, 0, nav_code(SCR_SETTINGS, 0, 0));
+  add_row(list, "SD", storage_ready() ? C_ACCENT : C_SUB, "Storage", buf, NULL, 0, 0, NAV_NONE);
+  add_row(list, "?",   C_SUB,   "About", "Edgehax S3-PRO  -  fw m2", NULL, 0, 0, NAV_NONE);
   load_screen(scr);
 }
 
@@ -2498,6 +2562,8 @@ static void render_top() {
     case SCR_SETTINGS:    build_settings();           break;
     case SCR_EDIT_BRIGHT: build_edit_bright();        break;
     case SCR_EDIT_POWER:  build_edit_power();         break;
+    case SCR_EDIT_DIM:    build_edit_dim();           break;
+    case SCR_EDIT_SLEEP:  build_edit_sleep();         break;
     case SCR_SPLASH:      build_splash();             break;
     case SCR_LOCK:        build_lock(false);          break;
     case SCR_SET_PIN:     build_lock(true);           break;
@@ -2595,24 +2661,27 @@ void setup() {
   Serial.printf("[sd] %s (%lu/%lu MB)\n", storage_ready() ? "mounted" : "no card",
                 (unsigned long)storage_used_mb(), (unsigned long)storage_total_mb());
 
-  // Restore saved prefs (brightness is the runtime-applicable one; timers are
-  // compile-time for now). Falls back to defaults when no card / no file.
+  // Restore saved prefs. Falls back to defaults when no card / no file.
   char cfgline[72];
   if (storage_load_config(cfgline, sizeof cfgline)) {
-    DeviceCfg cfg = {g_bright_pct, DIM_AFTER_MS / 1000, SLEEP_AFTER_MS / 1000, 0, g_power_lvl, g_lock.pin};
+    DeviceCfg cfg = {g_bright_pct, g_dim_s, g_sleep_s, 0, g_power_lvl, g_lock.pin};
     cfg_parse(cfgline, &cfg);
     g_bright_pct = cfg.bright < 10 ? 10 : cfg.bright > 100 ? 100 : cfg.bright;
     apply_brightness(g_bright_pct);
     g_power_lvl = pwr_clamp(cfg.power);
     set_power_level(g_power_lvl);
+    g_dim_s   = cfg.dim_s   < 5  ? 5  : cfg.dim_s   > 120 ? 120 : cfg.dim_s;
+    g_sleep_s = cfg.sleep_s < 10 ? 10 : cfg.sleep_s > 300 ? 300 : cfg.sleep_s;
+    if (g_sleep_s <= g_dim_s) g_sleep_s = g_dim_s + 5;   // same invariant as the edit callbacks
     if (cfg.pin != -1 && (cfg.pin < 0 || cfg.pin > 9999)) {
       Serial.printf("[cfg] pin=%d in config.txt is out of range (0-9999) -- "
                     "resetting to unlocked instead of an unmatchable PIN\n", cfg.pin);
       cfg.pin = -1;
     }
     g_lock.pin = cfg.pin;
-    Serial.printf("[cfg] restored brightness %d%%, intensity %s, pin %s\n",
-                  g_bright_pct, pwr_name(g_power_lvl), lock_configured(&g_lock) ? "set" : "none");
+    Serial.printf("[cfg] restored brightness %d%%, intensity %s, dim %ds, sleep %ds, pin %s\n",
+                  g_bright_pct, pwr_name(g_power_lvl), g_dim_s, g_sleep_s,
+                  lock_configured(&g_lock) ? "set" : "none");
   }
 
   cc1101_begin();
