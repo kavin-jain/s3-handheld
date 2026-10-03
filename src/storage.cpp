@@ -112,6 +112,33 @@ int storage_count_files(const char *dir, const char *ext) {
   return n;
 }
 
+const char *storage_nth_file(const char *dir, const char *ext, int idx) {
+  static char path[64];
+  path[0] = 0;
+  if (!s_ready || !dir || !ext || idx < 0) return path;
+  if (spi_a_mutex) xSemaphoreTakeRecursive(spi_a_mutex, portMAX_DELAY);
+  File d = SD.open(dir);
+  if (!d) { if (spi_a_mutex) xSemaphoreGiveRecursive(spi_a_mutex); return path; }
+  int seen = 0;
+  for (File e = d.openNextFile(); e; e = d.openNextFile()) {
+    const char *name = e.name();
+    const char *base = name;                 // some cores return a full path
+    for (const char *p = name; *p; p++) if (*p == '/') base = p + 1;
+    if (str_ends_with(base, ext)) {
+      if (seen == idx) {
+        snprintf(path, sizeof path, "%s/%s", dir, base);
+        e.close();
+        break;
+      }
+      seen++;
+    }
+    e.close();
+  }
+  d.close();
+  if (spi_a_mutex) xSemaphoreGiveRecursive(spi_a_mutex);
+  return path;
+}
+
 size_t storage_read_file(const char *path, char *out, size_t cap) {
   if (!s_ready || !path || !out || cap == 0) return 0;
   out[0] = 0;

@@ -26,3 +26,9 @@ size_t storage_read_file(const char *path, char *out, size_t cap);
 
 // Count files in `dir` whose name ends with `ext` (e.g. "/ir", ".ir"). Bring-up.
 int storage_count_files(const char *dir, const char *ext);
+
+// The idx-th file in `dir` (0-based, same directory order storage_count_files
+// walks) whose name ends with `ext`. Returns a path ("/ir/foo.ir") usable
+// directly with storage_read_file, or "" if idx is out of range / no card.
+// Bring-up.
+const char *storage_nth_file(const char *dir, const char *ext, int idx);

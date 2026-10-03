@@ -351,6 +351,14 @@ static lv_obj_t *g_edit_label = nullptr;
 // Per-screen ACTION-button handler (e.g. "save this capture to SD"). Cleared on
 // every screen change; invoked by on_action().
 static void (*g_action_cb)() = nullptr;
+// Per-screen encoder-CLICK handler, same shape as g_action_cb. Several screens'
+// own help text ("click = blast", "click = rescan", "click = replay"...)
+// advertises this, but poll_buttons never actually dispatched the encoder-click
+// edge to anything -- LVGL's indev only delivers a click to a *focused* object,
+// and a plain panel() tool screen (no add_row list items) never has one. Added
+// for tool_ir_universal (the one screen this session's scope covers); the same
+// gap on the other screens that say "click = X" is real but untouched here.
+static void (*g_click_cb)() = nullptr;
 // IR universal-remote live brand selector (encoder cycles g_ir_brand).
 static int       g_ir_brand = 0;
 static int       g_ac_temp = 24;               // A/C setpoint (ACTION bumps it)
@@ -523,6 +531,7 @@ static void poll_buttons(lv_timer_t *) {
   if      (edges & (1 << MCP_BTN_BACK))   nav_pop();
   else if (edges & (1 << MCP_BTN_HOME))   nav_home();
   else if (edges & (1 << MCP_BTN_ACTION)) on_action();
+  else if (edges & (1 << MCP_ENC_SW) && g_click_cb) g_click_cb();
 }
 
 // ---------------------------------------------------------------- UI helpers
@@ -1337,8 +1346,12 @@ static void tool_tvbgone(lv_obj_t *box) {        // Pranks / IR > TV-B-Gone
   g_action_cb = tvb_fire_action;
 }
 
-// Combined TV + A/C brand browser. Index 0..TV-1 = TV brands (irdb.h), the rest
-// = A/C brands (ac_db.h). Repaints name + code/protocol in place.
+// Combined TV + A/C + SD-IRDB brand browser. Index 0..TV-1 = TV brands
+// (irdb.h), next AC_BRAND_COUNT = A/C brands (ac_db.h), the rest = .ir files
+// under /ir on SD (flipper_ir.h) -- each showing/sending only its first
+// parsed record (Flipper's own convention names this "Power" on most real
+// .ir files; per-file multi-button selection is a separate, bigger feature,
+// not this one). Repaints name + code/protocol in place.
 static void ir_brand_edit_cb(int idx) {
   int tvN = ir_brand_count();
   if (idx < tvN) {
@@ -1346,13 +1359,19 @@ static void ir_brand_edit_cb(int idx) {
     if (g_ir_name_lbl) lv_label_set_text_fmt(g_ir_name_lbl, "TV   %s", b->name);
     if (g_ir_code_lbl)
       lv_label_set_text_fmt(g_ir_code_lbl, "POWER  0x%08lX", (unsigned long)b->power);
-  } else {
+  } else if (idx < tvN + AC_BRAND_COUNT) {
     const AcBrand *a = ac_brand_at(idx - tvN);
     if (!a) return;
     if (g_ir_name_lbl) lv_label_set_text_fmt(g_ir_name_lbl, "A/C  %s", a->name);
     if (g_ir_code_lbl)
       lv_label_set_text_fmt(g_ir_code_lbl, "%s %d\xC2\xB0""C   IRac #%d",
                             ac_mode_name(AC_COOL), ac_clamp_temp(g_ac_temp), a->proto);
+  } else {
+    const char *path = storage_nth_file("/ir", ".ir", idx - tvN - AC_BRAND_COUNT);
+    const char *base = path;
+    for (const char *p = path; *p; p++) if (*p == '/') base = p + 1;
+    if (g_ir_name_lbl) lv_label_set_text_fmt(g_ir_name_lbl, "SD   %s", base[0] ? base : "?");
+    if (g_ir_code_lbl) lv_label_set_text(g_ir_code_lbl, "click = blast first record");
   }
 }
 
@@ -1362,27 +1381,53 @@ static void ir_ac_temp_bump() {
   ir_brand_edit_cb(g_ir_brand);
 }
 
+// click = blast the currently-selected entry. TV brands use the generic
+// ir_send() this firmware already had (just never called from this screen).
+// A/C brands send nothing extra here: a real A/C blast needs IRremoteESP8266's
+// IRac class mapping full (protocol/mode/power/temp) state to a frame, which
+// this firmware doesn't implement yet (ac_state.h's own comment already says
+// so) -- not stubbing a fake send for it. SD .ir files parse+send their first
+// record via the existing, already-tested flipper_ir_at/ir_send_flipper pair.
+static void ir_blast_action() {
+  int tvN = ir_brand_count();
+  if (g_ir_brand < tvN) {
+    const IrBrand *b = ir_brand_at(g_ir_brand);
+    if (b) ir_send(b->proto, b->power, b->bits);
+  } else if (g_ir_brand < tvN + AC_BRAND_COUNT) {
+    // no-op -- see comment above.
+  } else {
+    const char *path = storage_nth_file("/ir", ".ir", g_ir_brand - tvN - AC_BRAND_COUNT);
+    if (!path[0]) return;
+    static char text[2048];
+    if (!storage_read_file(path, text, sizeof text)) return;
+    FlipperIr fp;
+    if (flipper_ir_at(text, 0, &fp)) ir_send_flipper(&fp);
+  }
+}
+
 static void tool_ir_universal(lv_obj_t *box) {   // IR > Universal remote
   lv_obj_t *p = panel(box);
-  int total = ir_brand_count() + AC_BRAND_COUNT;
+  int sdN = storage_ready() ? storage_count_files("/ir", ".ir") : 0;
+  int total = ir_brand_count() + AC_BRAND_COUNT + sdN;
   if (g_ir_brand < 0 || g_ir_brand >= total) g_ir_brand = 0;
   make_label(p, "UNIVERSAL REMOTE", &lv_font_unscii_8, C_ACCENT);
   g_ir_name_lbl = make_label(p, "", &lv_font_montserrat_20, C_TXT);
   g_ir_code_lbl = make_label(p, "", &lv_font_unscii_8, C_SUB);
   char n[40]; snprintf(n, sizeof n, "%d TV + %d A/C brands", ir_brand_count(), AC_BRAND_COUNT);
   make_label(p, n, &lv_font_montserrat_14, C_ACCENT_SFT);
-  if (storage_ready()) {                          // plus any Flipper IRDB on SD
-    char s[40]; snprintf(s, sizeof s, "+ SD IRDB: %d .ir files", storage_count_files("/ir", ".ir"));
+  if (sdN > 0) {                                   // plus any Flipper IRDB on SD
+    char s[40]; snprintf(s, sizeof s, "+ SD IRDB: %d .ir files", sdN);
     make_label(p, s, &lv_font_unscii_8, C_SUB);
   }
   make_label(box, "rotate = brand   ACTION = A/C temp   click = blast",
              &lv_font_unscii_8, C_MUTE);
   ir_brand_edit_cb(g_ir_brand);                  // paint the current selection
-  // Live-select across the whole TV+AC catalogue; ACTION adjusts A/C temp.
+  // Live-select across the whole TV+AC+SD catalogue; ACTION adjusts A/C temp.
   g_edit_val = &g_ir_brand;
   g_edit_min = 0; g_edit_max = total - 1; g_edit_step = 1;
   g_edit_cb = ir_brand_edit_cb;
   g_action_cb = ir_ac_temp_bump;
+  g_click_cb = ir_blast_action;
 }
 
 // Last learned IR frame + save status; ACTION writes it to /ir.
@@ -2301,6 +2346,7 @@ static void render_top() {
   g_edit_val = nullptr;                           // leaving any screen exits edit mode
   g_edit_label = nullptr;
   g_action_cb = nullptr;                          // and clears its ACTION handler
+  g_click_cb = nullptr;                           // and its encoder-click handler
   if (g_cfg_dirty) { save_config_now(); g_cfg_dirty = false; }   // persist on exit
   NavEntry &e = nav_stack[nav_depth - 1];
   switch (e.t) {

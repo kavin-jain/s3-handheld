@@ -31,10 +31,23 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 
 ## IR (TX GPIO47 / RX GPIO48)
 - ☐ Learns a real remote; blasts it back and the TV responds.
-- ☐ Universal-remote brand DB powers off a known TV/AC.
-- ☐ IRDB from SD: drop CC0 Flipper-IRDB .ir files under /ir; flipper_ir.h parses a
-      record and ir_send_flipper (NEC/NECext/Samsung32/SIRC*/RC6) blasts it. Verify
-      addr/cmd byte order matches the real remote (raw + RC5/Kaseikyo still unmapped).
+- ☐ Universal-remote brand DB powers off a known TV/AC. click = blast on a TV
+      brand now actually calls ir_send() (was previously advertised in the
+      screen's own help text but never wired to anything -- clicking did
+      nothing). A/C brands still don't send anything on click: a real A/C
+      blast needs IRremoteESP8266's IRac class, not implemented in this
+      firmware yet -- ACTION's temp-bump display is the only A/C interaction
+      that currently does anything.
+- ☐ IRDB from SD: drop CC0 Flipper-IRDB .ir files under /ir; the universal
+      remote now lists them after the TV/AC brands and click = blast sends
+      each file's first parsed record via flipper_ir_at + ir_send_flipper
+      (NEC/NECext/Samsung32/SIRC*/RC6). Verify addr/cmd byte order matches the
+      real remote (raw + RC5/Kaseikyo still unmapped); a file's 2nd+ buttons
+      aren't reachable from this UI yet (first record only).
+- ☐ The encoder-click dispatch itself (new: g_click_cb in main.cpp's
+      poll_buttons) is new wiring with no hardware behind it yet -- confirm a
+      real encoder click actually fires it (vs. e.g. bouncing/double-firing
+      against the existing button-tick buzzer feedback).
 
 ## WiFi / BLE (native)
 - ☐ Scan lists real APs + clients.
