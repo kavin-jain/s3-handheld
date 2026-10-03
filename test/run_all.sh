@@ -6,6 +6,14 @@
 # path/format helpers). They prove the brains of every feature on the host with
 # g++ — no hardware. The radio/NFC/IR/USB I/O is verified separately on-device
 # via docs/BRINGUP.md when you plug the board in.
+#
+# Built with ASan+UBSan: a pure-logic parser handling SD-loaded data (a key
+# dictionary, a config line, a malformed .ir file) has no business ever reading
+# or writing out of bounds, however malformed the input -- a plain "did it
+# return the right answer" pass can't see that, it only ever reads what the
+# test happened to hand it. This is what caught nfc_keys.h's nfc_parse_key
+# reading 1 byte past its input on a real "too short" case already in this
+# suite -- plain g++ had been passing it silently.
 set -u
 cd "$(dirname "$0")/.."
 
@@ -17,7 +25,7 @@ trap 'rm -rf "$tmp"' EXIT
 for src in test/test_*.cpp; do
   name="$(basename "$src" .cpp)"
   bin="$tmp/$name"
-  if ! g++ -std=c++17 -Wall "$src" -o "$bin" 2>"$tmp/err"; then
+  if ! g++ -std=c++17 -Wall -fsanitize=address,undefined -g "$src" -o "$bin" 2>"$tmp/err"; then
     fail=$((fail+1)); failed="$failed\n  BUILD  $name"; continue
   fi
   ok=1

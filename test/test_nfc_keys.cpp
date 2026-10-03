@@ -21,5 +21,17 @@ int main() {
   uint8_t one[] = {0x9C};
   assert(nfc_uid_hex(one, 1, h, sizeof h) > 0 && strcmp(h, "9C") == 0);
   assert(nfc_uid_hex(uid, 3, h, 3) == 0);            // too small -> safe 0
+
+  // Regression: nfc_parse_key must never read past its input's NUL terminator.
+  // "AB\0" is heap-allocated at *exactly* 3 bytes (no slack) so a build with
+  // ASan (test/run_all.sh runs one) traps a 1-byte over-read instantly instead
+  // of silently reading adjacent memory. This reproduces the exact failure:
+  // line[0]='A'/line[1]='B' are valid (i=0), then i=1 reads line[2]='\0' as
+  // `hi` -- the old code computed `lo = line[3]` unconditionally before
+  // checking `hi`, one byte past this 3-byte allocation.
+  char *tiny = new char[3];
+  tiny[0] = 'A'; tiny[1] = 'B'; tiny[2] = '\0';
+  assert(!nfc_parse_key(tiny, k));   // too short; must return false, not crash
+  delete[] tiny;
   return 0;
 }

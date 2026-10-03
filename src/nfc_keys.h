@@ -19,9 +19,15 @@ static inline bool nfc_parse_key(const char *line, uint8_t out[6]) {
   while (*line == ' ' || *line == '\t') line++;
   if (*line == '#' || *line == '\0' || *line == '\n' || *line == '\r') return false;
   for (int i = 0; i < 6; i++) {
+    // Check hi before reading line[i*2+1]: line is NUL-terminated, so once
+    // line[i*2] is confirmed non-NUL the next byte is guaranteed to exist
+    // (more content or the eventual NUL) -- reading both unconditionally
+    // first (as this used to) can read one byte past a buffer whose NUL
+    // lands exactly on an even offset relative to `line`.
     int hi = nfc_hexval(line[i * 2]);
+    if (hi < 0) return false;
     int lo = nfc_hexval(line[i * 2 + 1]);
-    if (hi < 0 || lo < 0) return false;
+    if (lo < 0) return false;
     out[i] = (uint8_t)((hi << 4) | lo);
   }
   if (nfc_hexval(line[12]) >= 0) return false;   // 13th hex char -> too long, reject
