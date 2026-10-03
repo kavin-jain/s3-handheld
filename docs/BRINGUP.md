@@ -36,6 +36,15 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
       hardware, and that sleep_s is kept 5s+ above dim_s (enforced in dim_edit_cb/
       sleep_edit_cb, main.cpp) rather than letting pm_tick's two sequential idle checks
       fire the same tick.
+- ⚠ WATCHDOG + LIGHT SLEEP: esp_task_wdt was added this session (10s timeout) and this
+      device light-sleeps until physical input, which can be minutes/hours. "Watchdog
+      fires immediately on wake from a long light sleep" is a documented ESP-IDF failure
+      mode (deadline elapses while the CPU is asleep and loop() isn't running to reset
+      it) -- confirmed via forum reports of exactly this on esp32.com, not assumed.
+      Mitigated by unsubscribing (esp_task_wdt_delete) before esp_light_sleep_start()
+      and resubscribing after, which removes the deadline entirely for the sleep window
+      instead of racing it. UNVERIFIED without hardware: let the device idle past the
+      sleep timer, confirm it does NOT reboot the instant you wake it.
 - ☐ Measure real current (USB meter) in active / dim / sleep; log mA for the 10 h math.
 
 ## Sub-GHz (2×CC1101, SPI-B)

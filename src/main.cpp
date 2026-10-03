@@ -464,7 +464,17 @@ static void pm_tick() {
     gpio_wakeup_enable((gpio_num_t)PIN_ENC_B, GPIO_INTR_LOW_LEVEL);
     if (mcp_ok) gpio_wakeup_enable((gpio_num_t)PIN_MCP_INT, GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
+    // Unsubscribe from the task watchdog before sleeping, not just reset it:
+    // this device sleeps until physical input, which can be arbitrarily long
+    // (shelf-idle for hours), and "watchdog fires immediately on wake from a
+    // long light sleep" is a well-documented ESP-IDF failure mode (the TWDT
+    // deadline can elapse while the CPU is asleep and not running loop()'s
+    // esp_task_wdt_reset() at all). Unsubscribing removes the deadline for
+    // this task entirely instead of racing it; re-subscribe right after.
+    esp_task_wdt_delete(NULL);
     esp_light_sleep_start();                   // blocks here until an input edge
+    esp_task_wdt_add(NULL);
+    esp_task_wdt_reset();
     gpio_wakeup_disable((gpio_num_t)PIN_ENC_A);
     gpio_wakeup_disable((gpio_num_t)PIN_ENC_B);
     if (mcp_ok) gpio_wakeup_disable((gpio_num_t)PIN_MCP_INT);
