@@ -511,11 +511,22 @@ static void on_action();
 // instant (no mechanical ramp-up); the motor's left for a later, bigger-
 // moment pulse (card read, capture saved) since a coin motor likely needs
 // longer than a click-length pulse to be felt — unverified without hardware.
+//
+// The 8ms "on" pulse is timed by a one-shot LVGL timer, not delay(8): this
+// runs on the single UI task, same one driving every animation, so a
+// blocking delay() here stalled rendering for 8ms on *every single press* --
+// the worst possible moment for a stutter, since it's tied directly to the
+// input that's supposed to feel instant. poll_buttons runs every 30ms, well
+// above the 8ms pulse, so back-to-back presses can't overlap two timers.
+static void click_tick_off(lv_timer_t *t) {
+  if (mcp_ok) mcp.digitalWrite(MCP_BUZZER, LOW);
+}
+
 static void click_tick() {
   if (!mcp_ok) return;
   mcp.digitalWrite(MCP_BUZZER, HIGH);
-  delay(8);
-  mcp.digitalWrite(MCP_BUZZER, LOW);
+  lv_timer_t *t = lv_timer_create(click_tick_off, 8, NULL);
+  lv_timer_set_repeat_count(t, 1);   // fires once, then LVGL deletes it for us
 }
 
 static void lock_repaint_dots();               // fwd (defined near build_lock)
