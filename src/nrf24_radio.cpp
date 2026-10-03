@@ -62,7 +62,11 @@ int     nrf_busiest_ch() { return nrf_busiest(s_counts, NRF_CHAN); }
 uint8_t nrf_activity(int ch) { return (ch >= 0 && ch < NRF_CHAN) ? s_counts[ch] : 0; }
 
 static volatile bool s_scan_requested = false;
-void nrf_scan_request() { s_scan_requested = true; }
+// Clearing s_scanned here (not just setting the request flag) matters for a
+// rescan: without it, nrf_scanned() stays true for the ~104ms the new sweep
+// takes, so a poll timer started right after this call would see "done" on
+// its very first tick and repaint the stale pre-rescan counts.
+void nrf_scan_request() { s_scanned = false; s_scan_requested = true; }
 void nrf_scan_service() {
   if (!s_scan_requested) return;
   s_scan_requested = false;

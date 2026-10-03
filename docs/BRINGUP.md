@@ -21,11 +21,22 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 
 ## Sub-GHz (2×CC1101, SPI-B)
 - ☐ CC1101 #1 version-register reads (0x14/0x04) — proves SPI-B works before stacking radios.
-- ☐ Frequency finder locks onto a known 433.92 remote; MHz + RSSI sane.
+- ☐ Frequency finder locks onto a known 433.92 remote; MHz + RSSI sane. click = lock now
+      writes the tuned band into g_sub_mhz (main.cpp) -- previously the finder's tuning
+      was cosmetic: Capture&replay and the Direction finder each hardcoded 433.92f
+      independently, so nothing you found here ever changed what they listened/sent on.
+      Confirm RSSI at a non-433 band (e.g. 915) still reads sane after a lock.
 - ☐ Fixed-code capture then replay opens your own gate. Rolling code shows "can't copy".
+      click = replay is now wired (subghz_replay_action) -- confirm a captured code
+      actually re-opens the gate, and that the locked g_sub_mhz (not always 433.92) is
+      what's transmitted on. Demo mode (no CC1101) now seeds real demo values instead of
+      stale/zeroed globals, so ACTION-save and click-replay act on what's shown on screen.
 
 ## NFC (PN532, I2C)
-- ☐ Reads a Mifare Classic UID; dictionary attack recovers a known key.
+- ☐ Reads a Mifare Classic UID; dictionary attack recovers a known key. click = crack keys
+      on the Read/clone screen now navigates to Mifare crack (T_NFC[1]) -- that screen is
+      still its own standalone bring-up demo and doesn't yet take the just-read UID as
+      input; clicking previously did nothing at all.
 - ☐ Reads a transit card balance; EMV reads PAN/expiry only.
 - ☐ Writes an NDEF tag that a phone opens.
 
@@ -44,10 +55,16 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
       (NEC/NECext/Samsung32/SIRC*/RC6). Verify addr/cmd byte order matches the
       real remote (raw + RC5/Kaseikyo still unmapped); a file's 2nd+ buttons
       aren't reachable from this UI yet (first record only).
-- ☐ The encoder-click dispatch itself (new: g_click_cb in main.cpp's
-      poll_buttons) is new wiring with no hardware behind it yet -- confirm a
-      real encoder click actually fires it (vs. e.g. bouncing/double-firing
-      against the existing button-tick buzzer feedback).
+- ☐ The encoder-click dispatch itself (g_click_cb in main.cpp's poll_buttons) is new
+      wiring with no hardware behind it yet -- confirm a real encoder click actually
+      fires it (vs. e.g. bouncing/double-firing against the existing button-tick buzzer
+      feedback). Now wired on 8 screens total, not just IR: Frequency finder (lock),
+      Capture&replay (replay), Direction finder (resample), NFC Read/clone (crack-keys
+      nav), WiFi scan (rescan, both the found-networks and no-networks-found branches),
+      BLE scan (rescan, both branches), NRF24 band scanner (rescan). Every one of these
+      previously had "click = X" in its own help text with nothing behind it --
+      poll_buttons simply never dispatched the encoder-click edge to anything before this
+      session. Confirm each one on real hardware, not just the one IR click tested so far.
 
 ## WiFi / BLE (native)
 - ☐ Scan lists real APs + clients.
@@ -56,7 +73,14 @@ Legend: ☐ not verified · ☑ verified on hardware · ⚠ issue (note it)
 - ☐ BLE scan sees phones/trackers; tracker-hunt flags a planted AirTag.
 
 ## NRF24 (2×NRF24, SPI-B) — add 10 µF caps first
-- ☐ Band scanner shows 2.4 GHz activity.
+- ☐ Band scanner shows 2.4 GHz activity. Rotary range fixed to 0..39 (NRF_CHAN-1) --
+      was 0..125, the full real nRF24 channel space, but nrf_scan() only ever sweeps
+      the lower 40 channels, so dialling past 39 showed a plausible MHz value with a
+      "<busiest>" flag that was silently always false (no data there to begin with).
+- ☐ click = rescan wired (nrf_rescan_action); nrf_scan_request() now also clears the
+      cached s_scanned flag so a poll timer started right after doesn't see "done"
+      on its first tick and repaint the stale pre-rescan counts. Confirm a rescan on
+      real hardware actually shows changed activity, not a flash of old data.
 - ☐ Band scanner's sweep now runs on a dedicated core-0 task (radio_task.h/.cpp)
       instead of inline on the UI task — confirm the UI (encoder, animation) stays
       responsive during the ~104ms sweep, and that spi_b_mutex genuinely serializes

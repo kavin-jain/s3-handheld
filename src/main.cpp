@@ -368,6 +368,12 @@ static lv_obj_t *g_ir_code_lbl = nullptr;
 static const float FREQ_PRESETS[] = {300.0f, 315.0f, 390.0f, 433.92f, 868.0f, 915.0f};
 static const int   FREQ_N = sizeof(FREQ_PRESETS) / sizeof(FREQ_PRESETS[0]);
 static int       g_freq_idx = 3;               // default 433.92 MHz
+// The single "active" sub-GHz frequency, shared by Capture&replay and the
+// Direction finder. Previously each screen hardcoded 433.92f independently,
+// so tuning the Frequency finder to a different band never actually affected
+// anything else -- "click = lock" was advertised but did nothing. Lock writes
+// here; the other two screens read it instead of their own literal.
+static float     g_sub_mhz = 433.92f;
 // Pranks USB-gag live selector (encoder cycles g_gag through the tested GAGS lib).
 static int       g_gag = 0;
 static lv_obj_t *g_gag_name = nullptr;
@@ -375,6 +381,7 @@ static lv_obj_t *g_gag_line = nullptr;
 static lv_obj_t *g_gag_status = nullptr;
 static lv_obj_t *g_freq_mhz = nullptr, *g_freq_sub = nullptr;
 static lv_obj_t *g_freq_guess = nullptr, *g_freq_bar = nullptr;
+static lv_obj_t *g_freq_lock_lbl = nullptr;
 
 static void apply_brightness(int pct) {
   bl_user_duty = (uint8_t)(pct * 255 / 100);
@@ -789,6 +796,13 @@ static void freq_paint(int idx) {
   if (g_freq_guess) lv_label_set_text(g_freq_guess, sg_guess(f));
 }
 
+// click = lock: adopt the currently-tuned band as g_sub_mhz, the frequency
+// Capture&replay and the Direction finder actually transmit/listen on.
+static void freq_lock_action() {
+  g_sub_mhz = FREQ_PRESETS[g_freq_idx];
+  if (g_freq_lock_lbl) lv_label_set_text_fmt(g_freq_lock_lbl, "locked %.2f MHz for capture/replay", g_sub_mhz);
+}
+
 static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
   if (g_freq_idx >= FREQ_N) g_freq_idx = 3;
   bool live = cc1101_present();
@@ -802,8 +816,10 @@ static void tool_freq_finder(lv_obj_t *box) {   // Sub-GHz > Frequency finder
   g_freq_guess = make_label(p, "", &lv_font_montserrat_16, C_TXT);
   make_label(p, live ? "rotate to tune the band" : "demo - CC1101 not detected",
              &lv_font_montserrat_14, live ? C_ACCENT_SFT : C_AMBER);
+  g_freq_lock_lbl = make_label(p, "", &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(box, "rotate = band    click = lock", &lv_font_unscii_8, C_MUTE);
   freq_paint(g_freq_idx);
+  g_click_cb = freq_lock_action;
   // Live-select: encoder cycles the preset band and re-measures in place.
   g_edit_val = &g_freq_idx;
   g_edit_min = 0; g_edit_max = FREQ_N - 1; g_edit_step = 1;
@@ -823,6 +839,15 @@ static void subghz_save_action() {
   const char *path = storage_save(SAVE_SUBGHZ, "sub", (const uint8_t *)body, (size_t)n);
   if (g_sub_status)
     lv_label_set_text(g_sub_status, (path && path[0]) ? path : "no SD card");
+}
+
+// click = replay: re-transmit the last capture at the locked frequency
+// (g_sub_mhz). subghz_replay() itself no-ops without a CC1101 present, so
+// demo mode gets an honest status line instead of a silent dead click.
+static void subghz_replay_action() {
+  if (!g_sub_bits) { if (g_sub_status) lv_label_set_text(g_sub_status, "nothing captured yet"); return; }
+  bool ok = subghz_replay(g_sub_mhz, g_sub_code, g_sub_bits, g_sub_proto);
+  if (g_sub_status) lv_label_set_text(g_sub_status, ok ? "replayed" : "no CC1101 - demo only");
 }
 
 static lv_obj_t *g_sub_panel = nullptr;
@@ -845,10 +870,12 @@ static void subghz_poll_cb(lv_timer_t *t) {
     char h[40]; rcs_fmt(code, bits, proto, h, sizeof h);
     make_label(g_sub_panel, "CAPTURED", &lv_font_unscii_8, C_ACCENT);
     make_label(g_sub_panel, h, &lv_font_montserrat_20, C_TXT);
-    make_label(g_sub_panel, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
+    char fl[40]; snprintf(fl, sizeof fl, "%.2f MHz  -  fixed code (OOK)", g_sub_mhz);
+    make_label(g_sub_panel, fl, &lv_font_montserrat_14, C_SUB);
     g_sub_status = make_label(g_sub_panel, "ACTION = save to /subghz", &lv_font_unscii_8, C_ACCENT_SFT);
     make_label(g_sub_box, "ACTION saves .sub -> SD    click = replay", &lv_font_unscii_8, C_MUTE);
     g_action_cb = subghz_save_action;
+    g_click_cb = subghz_replay_action;
     mascot_play(lv_scr_act(), MASCOT_MISA, LV_ALIGN_BOTTOM_MID, false);
   }
 }
@@ -860,23 +887,32 @@ static void tool_subghz_capture(lv_obj_t *box) { // Sub-GHz > Capture & replay
   bool live = cc1101_present();
   
   if (!live) {
+    // Seed the globals ACTION/click actually act on so they match what's on
+    // screen -- previously this just painted a literal string while
+    // save/replay read g_sub_code/bits/proto, which stayed at their 0
+    // file-scope defaults (or whatever a prior real capture left behind).
+    g_sub_code = 0x0015F3; g_sub_bits = 24; g_sub_proto = 1;
     make_label(p, "DEMO CAPTURE", &lv_font_unscii_8, C_AMBER);
     make_label(p, "0x0015F3 (24-bit)", &lv_font_montserrat_20, C_TXT);
     make_label(p, "433.92 MHz  -  fixed code (OOK)", &lv_font_montserrat_14, C_SUB);
     g_sub_status = make_label(p, "ACTION = save to /subghz", &lv_font_unscii_8, C_ACCENT_SFT);
     make_label(box, "ACTION saves .sub -> SD    click = replay", &lv_font_unscii_8, C_MUTE);
     g_action_cb = subghz_save_action;
+    g_click_cb = subghz_replay_action;
     return;
   }
-  
-  make_label(p, "LISTENING 433.92", &lv_font_unscii_8, C_ACCENT);
+
+  char lh[32]; snprintf(lh, sizeof lh, "LISTENING %.2f", g_sub_mhz);
+  make_label(p, lh, &lv_font_unscii_8, C_ACCENT);
   make_label(p, "press a fob near the antenna", &lv_font_montserrat_16, C_TXT);
   ui_anim_radar_create(p, 60, lv_color_hex(C_CYAN));
   mascot_play(p, MASCOT_L, LV_ALIGN_TOP_RIGHT, true);
-  make_label(box, "rotate = band    click = replay", &lv_font_unscii_8, C_MUTE);
-  
+  // Nothing captured yet, so no rotate/click claim here -- g_click_cb stays
+  // unset until subghz_poll_cb actually has something to replay.
+  make_label(box, "waiting for a fob press...", &lv_font_unscii_8, C_MUTE);
+
   g_cleanup_cb = subghz_cleanup;
-  subghz_capture_begin(433.92f);
+  subghz_capture_begin(g_sub_mhz);
   g_tool_timer = lv_timer_create(subghz_poll_cb, 50, NULL);
 }
 
@@ -1009,6 +1045,12 @@ static void nfc_retry_poll_cb(lv_timer_t *t) {
   tool_nfc_read(g_nfc_box);
 }
 
+// click = crack keys: jump to RFID/NFC > Mifare crack (T_NFC[1]). That screen
+// is its own honest bring-up demo (doesn't yet take this UID as input) but
+// clicking previously did nothing at all -- this is at minimum the navigation
+// the help text already promised.
+static void nfc_crack_nav_action() { nav_push(SCR_TOOL, 1, 1); }
+
 static void nfc_poll_cb(lv_timer_t *t) {
   uint8_t uid[7], len = 0;
   if (nfc_read_uid(uid, &len)) {
@@ -1023,6 +1065,7 @@ static void nfc_poll_cb(lv_timer_t *t) {
     g_nfc_status = make_label(g_nfc_panel, "ACTION = save to /nfc", &lv_font_montserrat_14, C_ACCENT_SFT);
     make_label(g_nfc_box, "ACTION saves UID    click = crack keys", &lv_font_unscii_8, C_MUTE);
     g_action_cb = nfc_save_action;
+    g_click_cb = nfc_crack_nav_action;
     mascot_play(lv_scr_act(), MASCOT_MISA, LV_ALIGN_BOTTOM_MID, false);
   }
 }
@@ -1061,17 +1104,26 @@ static void wifi_save_action() {
     lv_label_set_text(g_wifi_status, (path && path[0]) ? path : "no SD card");
 }
 
+// click = rescan: re-enter the screen, which re-triggers wifi_scan_async().
+static void wifi_rescan_action() {
+  if (!g_wifi_box) return;
+  lv_obj_clean(g_wifi_box);
+  tool_wifi_scan(g_wifi_box);
+}
+
 static void wifi_poll_cb(lv_timer_t *t) {
   int n = wifi_scan_complete();
   if (n == -1) return; // Still scanning
-  
+
   lv_timer_del(g_tool_timer);
   g_tool_timer = nullptr;
   lv_obj_clean(g_wifi_panel);
-  
+
   if (n <= 0) {
     make_label(g_wifi_panel, "WIFI SCAN", &lv_font_unscii_8, C_ACCENT);
     make_label(g_wifi_panel, "no networks found", &lv_font_montserrat_16, C_SUB);
+    make_label(g_wifi_box, "click = rescan", &lv_font_unscii_8, C_MUTE);
+    g_click_cb = wifi_rescan_action;
     return;
   }
   char h[24]; snprintf(h, sizeof h, "%d networks", n);
@@ -1086,6 +1138,7 @@ static void wifi_poll_cb(lv_timer_t *t) {
   g_wifi_status = make_label(g_wifi_panel, "ACTION = save list to /wifi", &lv_font_unscii_8, C_ACCENT_SFT);
   make_label(g_wifi_box, "ACTION saves CSV    click = rescan", &lv_font_unscii_8, C_MUTE);
   g_action_cb = wifi_save_action;
+  g_click_cb = wifi_rescan_action;
 }
 
 static void tool_wifi_scan(lv_obj_t *box) {      // WiFi > Scan / recon
@@ -1117,8 +1170,20 @@ static void tool_csi(lv_obj_t *box) {            // See invisible > See through 
   make_label(box, "esp_wifi CSI capture = bring-up", &lv_font_unscii_8, C_MUTE);
 }
 
+static lv_obj_t *g_df_box = nullptr;
+
+// click to sample: the screen's own render IS the sample, so re-render it.
+// Previously nothing dispatched the click at all -- "click to sample" was
+// just text, rotating/clicking did nothing until the next unrelated redraw.
+static void df_resample_action() {
+  if (!g_df_box) return;
+  lv_obj_clean(g_df_box);
+  tool_df(g_df_box);
+}
+
 static void tool_df(lv_obj_t *box) {             // See invisible > Direction finder
   static int prev = -80;
+  g_df_box = box;
   lv_obj_t *p = panel(box);
   make_label(p, "DIRECTION FINDER", &lv_font_unscii_8, C_ACCENT);
   if (!cc1101_present()) {
@@ -1126,13 +1191,14 @@ static void tool_df(lv_obj_t *box) {             // See invisible > Direction fi
     make_label(p, "433.92 MHz  -70 dBm  WARMER", &lv_font_montserrat_14, C_SUB);
     return;
   }
-  int rssi = cc1101_rssi_at(433.92f);
+  int rssi = cc1101_rssi_at(g_sub_mhz);   // locked frequency (Frequency finder), not a fixed literal
   int t = df_trend(rssi, prev);
   prev = rssi;
   char h[40]; snprintf(h, sizeof h, "%d dBm  %s", rssi, df_label(t));
   make_label(p, h, &lv_font_montserrat_20, t > 0 ? C_ACCENT : t < 0 ? C_RED : C_TXT);
   make_label(p, "walk around - click to sample", &lv_font_montserrat_14, C_SUB);
   make_label(box, "warmer = closer to the transmitter", &lv_font_unscii_8, C_MUTE);
+  g_click_cb = df_resample_action;
 }
 
 static int       g_nrf_ch = 6;                   // live 2.4 GHz channel inspector
@@ -1155,6 +1221,15 @@ static void nrf_scan_poll_cb(lv_timer_t *t) {
   nrf_paint(g_nrf_ch);
 }
 
+// click = rescan: nrf_scan_request() also clears the cached s_scanned flag
+// (nrf24_radio.cpp), so the poll timer below won't see a stale "done" on its
+// first tick and repaint last sweep's counts.
+static void nrf_rescan_action() {
+  if (!nrf_present() || g_tool_timer) return;   // already mid-scan
+  nrf_scan_request();
+  g_tool_timer = lv_timer_create(nrf_scan_poll_cb, 50, NULL);
+}
+
 static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanner
   lv_obj_t *p = panel(box);
   bool live = nrf_present();
@@ -1163,14 +1238,18 @@ static void tool_nrf_scan(lv_obj_t *box) {       // NRF24 / 2.4GHz > Band scanne
   make_label(p, live ? "rotate to inspect a channel" : "demo - NRF24 not detected",
              &lv_font_montserrat_14, live ? C_SUB : C_AMBER);
   make_label(box, "click = rescan", &lv_font_unscii_8, C_MUTE);
+  g_click_cb = nrf_rescan_action;
   if (live && !nrf_scanned()) {
     nrf_scan_request();
     g_tool_timer = lv_timer_create(nrf_scan_poll_cb, 50, NULL);
   }
   nrf_paint(g_nrf_ch);
-  // Live-select: rotary walks the 126 nRF channels, flags the busiest.
+  // Live-select: walk only the channels the sweep actually covers (0..NRF_CHAN-1,
+  // 2400-2439 MHz). Was 0..125 (the full real nRF24 channel space) -- past
+  // channel 39 the "<busiest>" flag was silently always false because
+  // nrf_scan() never collected data there; the UI implied it had, it hadn't.
   g_edit_val = &g_nrf_ch;
-  g_edit_min = 0; g_edit_max = 125; g_edit_step = 1;
+  g_edit_min = 0; g_edit_max = NRF_CHAN - 1; g_edit_step = 1;
   g_edit_cb = nrf_paint;
 }
 
@@ -1523,17 +1602,26 @@ static void tool_ir_learn(lv_obj_t *box) {       // IR > Learn & blast
 static lv_obj_t *g_ble_panel = nullptr;
 static lv_obj_t *g_ble_box = nullptr;
 
+// click = rescan: re-enter the screen, which re-triggers ble_scan_async(3).
+static void ble_rescan_action() {
+  if (!g_ble_box) return;
+  lv_obj_clean(g_ble_box);
+  tool_ble_scan(g_ble_box);
+}
+
 static void ble_poll_cb(lv_timer_t *t) {
   if (!ble_scan_complete()) return;
-  
+
   lv_timer_del(g_tool_timer);
   g_tool_timer = nullptr;
   lv_obj_clean(g_ble_panel);
-  
+
   int n = ble_count();
   if (n <= 0) {
     make_label(g_ble_panel, "BLE SCAN", &lv_font_unscii_8, C_ACCENT);
     make_label(g_ble_panel, "nothing advertising nearby", &lv_font_montserrat_16, C_SUB);
+    make_label(g_ble_box, "click = rescan", &lv_font_unscii_8, C_MUTE);
+    g_click_cb = ble_rescan_action;
     return;
   }
   char h[24]; snprintf(h, sizeof h, "%d devices", n);
@@ -1548,6 +1636,7 @@ static void ble_poll_cb(lv_timer_t *t) {
     make_label(g_ble_panel, line, &lv_font_montserrat_14, ble_is_tracker(i) ? C_CYAN : C_TXT);
   }
   make_label(g_ble_box, "click = rescan    cyan = tracker", &lv_font_unscii_8, C_MUTE);
+  g_click_cb = ble_rescan_action;
 }
 
 static void tool_ble_scan(lv_obj_t *box) {       // Bluetooth > Scan / recon
