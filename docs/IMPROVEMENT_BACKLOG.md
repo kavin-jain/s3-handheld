@@ -131,3 +131,63 @@ be true for `pin` outside `0..9999` (or for `pin == -1`) would have surfaced the
 missing clamp at the `cfg_parse` call site. Fix: add `test/test_ui_lock.cpp`
 covering digit entry/reset/match, including the out-of-range-`pin` case.
 **Effort:** S
+
+## 2026-10-04
+
+Note: re-checking the 2026-10-01/02 entries against current `origin/main`, items
+about `tool_nrf_scan`, `nfc_parse_key`, the `.ir`/DuckyScript SD wiring and
+`ui_lock` tests have since been fixed; they are not repeated below.
+
+### 1. `DELAY` in an SD payload is unclamped and the whole script runs on the UI task
+**File/function:** `src/badusb.cpp:badusb_run_line` (`case DK_DELAY`), `src/main.cpp:ducky_run_action`
+`badusb_run_line` does `delay(atoi(arg))` on the raw text after `DELAY`, with no
+clamp. `delay()` takes a `uint32_t`, so a payload line like `DELAY -1` (or a
+typo/garbled SD line) becomes a ~49-day block. `ducky_run_action` also loops over
+every line synchronously from the ACTION handler, so the UI, button polling and
+the PM sleep timer are frozen for the whole script with no way to abort. The
+2048-byte `text[]` buffer also silently truncates longer payloads mid-line.
+Fix: clamp the delay to 0..~10000 ms (host-testable in `ducky.h`) and step one
+line per `lv_timer` tick so rotate/click can cancel.
+**Effort:** S
+
+### 2. `storage_save_config` rewrites `/config.txt` in place, so a power loss can wipe the PIN and settings
+**File/function:** `src/storage.cpp:storage_save_config`, called by `src/main.cpp:save_config_now`
+`storage_save_config` opens `/config.txt` with `FILE_WRITE` (truncate) and then
+prints the new line. A brownout or battery cut between the truncate and the
+`print` leaves an empty/partial file, and `save_config_now` serialises the lock
+PIN along with brightness, timers and power level. Fix: write `/config.tmp`, then
+`SD.remove` + `SD.rename` over `/config.txt`, and on load fall back to the tmp
+file if the main one is empty.
+**Effort:** S
+
+### 3. Every encoder tick on the BadUSB and IR screens re-walks the SD directory, and file reads are byte-at-a-time
+**File/function:** `src/storage.cpp:storage_nth_file` / `storage_count_files` / `storage_read_file`; callers `src/main.cpp:ducky_paint`, `ir_brand_edit_cb`
+`ducky_paint` (the `g_edit_cb`) and the SD branch of `ir_brand_edit_cb` each call
+`storage_nth_file`, which opens the folder and iterates `openNextFile()` up to
+`idx` while holding `spi_a_mutex`, on the UI task that shares SPI-A with the TFT.
+`storage_read_file` also reads with one `f.read()` call per byte. Fix: cache the
+file names once on screen entry (small fixed `char[N][32]`), and use
+`f.read(buf, n)` for the read loop.
+**Effort:** S
+
+### 4. TV-B-Gone has only 5 codes and blasts them on the UI task
+**File/function:** `src/tvbgone.h:TVB_CODES`, `src/tvbgone.cpp:tvbgone_fire_all`, `src/main.cpp:tvb_fire_action`
+`TVB_CODES` holds 5 entries (Samsung, LG, Sony, generic NEC, Philips), and the
+file comment itself calls it a starter table. `tvbgone_fire_all` loops with
+`delay(gap_ms)` between sends, called directly from `tvb_fire_action`, so the
+screen is frozen for the whole blast and grows with every code added. Since
+`flipper_ir_at`/`ir_send_flipper` already work, the blast could also walk a
+`/ir/tv*.ir` file from SD, one record per `lv_timer` tick.
+**Effort:** M
+
+### 5. SD `.ir` files only ever send record 0, and files over 2 KB are cut off
+**File/function:** `src/main.cpp:ir_blast_action`, `src/flipper_ir.h:flipper_ir_count`
+`ir_blast_action` loads the file into a static `text[2048]` and calls
+`flipper_ir_at(text, 0, &fp)`, so only the first record is reachable, and the UI
+label says "click = blast first record". `flipper_ir_count` exists but has no
+caller in `src/*.cpp`/`main.cpp`, and the `.ir` text that falls beyond byte 2047
+is dropped by `storage_read_file`. Flipper-IRDB remotes usually hold many
+buttons, so most of each file is unusable. Fix: rotate through records with the
+encoder (`flipper_ir_count` for the range, show the record name), and read the
+file in chunks or enlarge the buffer from PSRAM.
+**Effort:** M
