@@ -24,7 +24,7 @@ language, with the raw MHz/hex one click away.
 - **Hardware:** ESP32-S3-WROOM-1-**N16R8** (16 MB flash, 8 MB octal PSRAM) on the *Edgehax S3-PRO* carrier
 - **Radios:** 2× CC1101 (sub-GHz) · 2× NRF24L01+ (2.4 GHz) · PN532 (NFC) · IR TX/RX · native WiFi + BLE + USB-OTG
 - **UI:** LVGL 8.3 on a 2.4″ ILI9341, driven by a rotary encoder + 3 buttons — **61 tools across 13 categories**
-- **Firmware:** PlatformIO + Arduino-ESP32, GPL-3.0, fully original (no vendored code), 54 host unit tests
+- **Firmware:** PlatformIO + Arduino-ESP32, GPL-3.0, fully original (no vendored code), 56 host unit tests
 
 ---
 
@@ -328,7 +328,7 @@ cd s3-handheld
 ### 2. Test (pure logic, host g++ — no hardware needed)
 
 ```bash
-bash test/run_all.sh          # compiles & runs all 54 host suites, twice each
+bash test/run_all.sh          # compiles & runs all 56 host suites, twice each
 ```
 
 ### 3. Compile
@@ -416,7 +416,7 @@ documented **red zone** that is intentionally never built.
 ```bash
 bash test/run_all.sh
 ```
-Compiles and runs **54 host suites** (plain `g++ -std=c++17`, each run twice) covering every pure
+Compiles and runs **56 host suites** (plain `g++ -std=c++17`, each run twice) covering every pure
 function — parsers, decoders, frame/key builders, path logic. No hardware, no framework, no fixtures.
 The suite is green on `main`.
 
