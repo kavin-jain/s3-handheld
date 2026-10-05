@@ -1,5 +1,16 @@
 # Edgehax S3-PRO — Multi-Radio Security Handheld
 
+<p align="center">
+  <img src="docs/photos/hero.jpg" width="720" alt="Bench prototype: two CC1101 sub-GHz radios, two NRF24L01+ with antennas, 2.4-inch ILI9341 display, IR emitter and rotary encoder on a perfboard carrier" />
+</p>
+
+<p align="center">
+  <a href="#bill-of-materials-bom"><b>BOM</b></a> ·
+  <a href="#build-flash--first-boot"><b>Build &amp; flash</b></a> ·
+  <a href="#feature-maturity"><b>What works today</b></a> ·
+  <a href="#safety-legal--the-red-zone"><b>Legal / red zone</b></a>
+</p>
+
 Custom **Flipper-class firmware** for an ESP32-S3 handheld that reads, decodes and (where legal)
 replays the wireless world around you: sub-GHz, 2.4 GHz, 13.56 MHz NFC, and IR — plus native
 WiFi/BLE/USB. The UI is **interpretation-first**: the screen tells you *what* a signal is in plain
