@@ -191,3 +191,44 @@ buttons, so most of each file is unusable. Fix: rotate through records with the
 encoder (`flipper_ir_count` for the range, show the record name), and read the
 file in chunks or enlarge the buffer from PSRAM.
 **Effort:** M
+
+## 2026-10-05
+
+### 1. Bug Sweep promises "Press action to sweep again" but sets no action handler, and most of its band list is outside the CC1101's range
+**File/function:** `src/main.cpp:tool_audiobug` / `audiobug_timer_cb`, `s_bug_freqs[]`
+`audiobug_timer_cb` pauses its timer once the 11-point sweep finishes and paints
+"Press action to sweep again", but `tool_audiobug` never assigns `g_action_cb`
+(the only handler it sets is `g_cleanup_cb`), so ACTION does nothing and the sweep
+cannot be re-run without leaving the screen. Separately, `s_bug_freqs[]` includes
+88 / 92.5 / 96.5 / 102.1 / 107.9 / 144 / 155 / 168 MHz, which are below the CC1101
+datasheet bands (300-348, 387-464, 779-928 MHz); the RSSI read for those entries
+via `cc1101_rssi_at` is unlikely to mean anything, yet the result screen still
+labels hits "FM covert mic" / "VHF bug" via `bug_band`. (I could not check how the
+SmartRC lib's `setMHZ` treats out-of-band values: it is not vendored in `lib/`.)
+Fix: set `g_action_cb` to reset `s_bug_idx` and `lv_timer_resume`, and restrict
+the sweep to in-band points (or label the others "not covered by CC1101").
+**Effort:** S
+
+### 2. GPIO Play's safety gate only blocks flash/PSRAM pins, so it can drive pins the board itself uses
+**File/function:** `src/gpio_util.h:gpio_usable`, `src/main.cpp:gpio_toggle_action`
+`gpio_usable` rejects only 26-37 and non-existent pins. `gpio_toggle_action` then
+does `pinMode(g_gpio_pin, OUTPUT)` + `digitalWrite` on anything else, including
+pins `include/pins.h` assigns to live peripherals: I2C SDA/SCL (1, 2), MCP INT (3),
+SPI-B SCLK/MOSI/MISO (4-6), SD SPI-A (10-13), TFT DC/RST/CS (14, 21, 41) and the
+encoder (38, 39). Selecting one and pressing ACTION turns a live bus line into a
+GPIO output, which can hang the display, buttons or SD until reboot. The screen
+shows "safe to drive" for all of them. Fix: add a `gpio_in_use(pin)` table derived
+from `pins.h` (host-testable in `gpio_util.h`) and show "IN USE" instead.
+**Effort:** S
+
+### 3. Firmware Dump only ever writes the first 64 KB, while BRINGUP.md expects a full chip dump
+**File/function:** `src/main.cpp:fwdump_action` (`FWDUMP_BYTES`), `docs/BRINGUP.md:153`
+`fwdump_action` allocates a 64 KB PSRAM buffer, does one `esp_flash_read` from
+offset 0 and a single `storage_save`; the code comment notes `storage_save` is
+one-shot per file. The tool screen says "dump first 64KB", but BRINGUP.md's
+checklist item reads "full chip dumps to dump.bin on SD". 64 KB from offset 0 is
+bootloader + partition table territory, so the app image and NVS are never
+captured. Fix: add an append mode to `storage.cpp` (open once, write 64 KB chunks
+for `jedec_capacity_bytes` total, one chunk per `lv_timer` tick with a progress
+label), or reword the BRINGUP item to match.
+**Effort:** M
