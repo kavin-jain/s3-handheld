@@ -192,6 +192,39 @@ encoder (`flipper_ir_count` for the range, show the record name), and read the
 file in chunks or enlarge the buffer from PSRAM.
 **Effort:** M
 
+## 2026-10-07
+
+### 1. WiFi > Deauth (authorized) screen never calls the actual TX function
+**File/function:** `src/main.cpp:2208` (`tool_deauth_atk`), vs. `src/deauth_detect.cpp:43`
+(`wifi_deauth_tx`)
+`tool_deauth_atk` builds one demo `deauth_frame(bcast, bssid, 7, f)` purely to show
+on screen, labels itself "pick AP + client, click to send - TX bring-up", but sets
+neither `g_action_cb` nor `g_click_cb` — there is no handler at all on this screen.
+A repo-wide search confirms `wifi_deauth_tx()` (the fully-implemented, bidirectional
+deauth+disassoc sender in `deauth_detect.cpp`, already covered by
+`test/test_deauth_frame.cpp` for its frame builders) has zero callers anywhere in
+`src/`. This is the same class of "advertised but not wired" gap the 2026-10-02/04
+entries found and fixed for DuckyScript/.ir records/TV-B-Gone, just not caught in
+that audit. Fix: wire a click handler that calls `wifi_deauth_tx` against the
+currently-selected/demo AP+client, same shape as `subghz_replay_action`.
+**Effort:** S
+
+### 2. Mifare crack screen is a pure demo — `nfc_crack_block` (the real auth loop) has no caller
+**File/function:** `src/main.cpp:1013` (`tool_mifare`), vs. `src/nfc_pn532.cpp:49`
+(`nfc_crack_block`)
+`tool_mifare` always shows a hardcoded `found[6] = {0xFF...}` key and never reads a
+real card — it only counts how many keys are in `/nfc/keys.dic`
+(`mifare_dict_count`) and prints `mifare_key_name(found)` against that constant.
+`nfc_crack_block(uid, uidLen, block, keyType, dictPath, outKey)` — which actually
+opens the SD dictionary, tries each key via `nfc_auth_block` against a real card,
+and returns the matching key — is fully implemented in `nfc_pn532.cpp`/`.h` but a
+repo-wide search shows it is never called from `main.cpp` or anywhere else. Unlike
+`tool_nfc_read` (which already calls `nfc_read_uid` for a live UID), this screen
+doesn't even attempt a live read. Fix: call `nfc_read_uid` then `nfc_crack_block`
+against `/nfc/keys.dic` (falling back to the built-in `MIFARE_DEFAULT_KEYS` table)
+behind an `lv_timer` poll, same shape as `tool_nfc_read`'s `nfc_poll_cb`.
+**Effort:** M
+
 ## 2026-10-05
 
 ### 1. Bug Sweep promises "Press action to sweep again" but sets no action handler, and most of its band list is outside the CC1101's range
