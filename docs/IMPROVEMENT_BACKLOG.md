@@ -265,3 +265,43 @@ captured. Fix: add an append mode to `storage.cpp` (open once, write 64 KB chunk
 for `jedec_capacity_bytes` total, one chunk per `lv_timer` tick with a progress
 label), or reword the BRINGUP item to match.
 **Effort:** M
+
+## 2026-10-08
+
+### 1. Three separate 2 KB static scratch buffers permanently reserve ~6 KB of RAM for mutually-exclusive one-shot reads
+**File/function:** `src/main.cpp:1020` (`tool_mifare`'s `static char dic[2048]`),
+`src/main.cpp:1480` (`ducky_run_action`'s `static char text[2048]`), `src/main.cpp:1597`
+(`ir_blast_action`'s `static char text[2048]`)
+Each of these three functions declares its own file-scope `static char ...[2048]`
+buffer purely to hold one `storage_read_file()` result (a `keys.dic`, a `.txt`
+DuckyScript, or a `.ir` record) for the duration of that single call. Because
+the UI is single-task and only one tool screen/action can ever be active at a
+time (`build_tool()` tears down the previous screen before the next renders,
+and `g_action_cb`/`g_click_cb` only ever point at one handler), these three
+buffers are never live simultaneously, yet each is a distinct named `static`
+so the linker reserves all three in BSS permanently — 6144 bytes that could be
+one shared 2048-byte scratch buffer. On a chip where flash/PSRAM already carry
+the LVGL framebuffers and `g_ndef_tag`/mascot sprite data, trimming 4 KB of
+dead-weight static RAM is free. Fix: declare one `static char g_sd_scratch[2048];`
+at file scope and have all three call sites use it instead of their own copy.
+**Effort:** S
+
+### 2. The covert-bug sweep's "waves" animation forces a full resize+re-layout on every single animation frame
+**File/function:** `src/ui_anim.cpp` (`waves_anim_cb`, called by `ui_anim_waves_create`),
+used by `src/main.cpp:1929` (`tool_audiobug`, during the live 50 ms `audiobug_timer_cb` sweep)
+`waves_anim_cb` is the `lv_anim` exec callback for each of the three expanding-ring
+arcs `ui_anim_waves_create` spawns; it runs on every animation tick (LVGL's
+default animation refresh, effectively every display refresh) and calls
+`lv_obj_set_size(arc, v, v)` followed by `lv_obj_center(arc)` each time, i.e. a
+full size + position recompute (and the invalidate/redraw that `lv_obj_set_size`
+triggers) for all three concurrently-animating arcs, every frame, for as long as
+the Bug Sweep screen's sweep runs. `ui_anim_radar_create`'s equivalent callback,
+by contrast, only ever adjusts the arc's start/end angles
+(`lv_arc_set_bg_angles`), which LVGL can redraw without a layout pass — the waves
+animation is the one path doing the heavier operation per frame, on the one
+screen (`tool_audiobug`) that already runs a live polling timer for several
+seconds. Fix: pre-size the three arcs once and animate an `lv_obj_set_style_*`
+transform/opacity-only property instead of calling `lv_obj_set_size`/`lv_obj_center`
+every tick (e.g. a scale transform via `lv_obj_set_style_transform_zoom`, which
+skips layout).
+**Effort:** S
