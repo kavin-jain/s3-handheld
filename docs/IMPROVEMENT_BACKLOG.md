@@ -305,3 +305,60 @@ transform/opacity-only property instead of calling `lv_obj_set_size`/`lv_obj_cen
 every tick (e.g. a scale transform via `lv_obj_set_style_transform_zoom`, which
 skips layout).
 **Effort:** S
+
+## 2026-10-09
+
+### 1. CC1101 is left in RX (never idled) after Frequency finder / Direction finder / Bug Sweep
+**File/function:** `src/radio_cc1101.cpp:cc1101_rssi_at`; callers `src/main.cpp:freq_paint`, `tool_df`, `audiobug_timer_cb`
+`cc1101_rssi_at` does `setMHZ` + `SetRx()` and returns without ever calling `setSidle()`.
+The only `setSidle()` in the firmware is in `subghz_capture_end`/`subghz_replay`, and
+`main.cpp` has no other idle call (grep: `setSidle` appears only in `radio_cc1101.cpp`).
+So after leaving any RSSI-only screen the radio keeps receiving (roughly 15 mA class draw)
+through `PM_DIM` and into `esp_light_sleep_start()` in `pm_tick`, which undercuts the
+power-management work. Fix: add `cc1101_idle()` (SpiStrobe SIDLE under `spi_b_mutex`) and call
+it from a `g_cleanup_cb` on those three screens and at the top of the `pm_tick` sleep branch.
+**Effort:** S
+
+### 2. Radio task wakes every 20 ms forever just to check one flag
+**File/function:** `src/radio_task.cpp:radio_task_fn`, `src/nrf24_radio.cpp:nrf_scan_request` / `nrf_scan_service`
+`radio_task_fn` loops `nrf_scan_service(); vTaskDelay(pdMS_TO_TICKS(20));`, and
+`nrf_scan_service` returns immediately unless the `s_scan_requested` flag is set. That is
+50 wakeups/s on core 0 for the whole uptime to service a request that comes from a user click,
+and a new request can wait up to 20 ms. Fix: store the task handle (the `xTaskCreatePinnedToCore`
+call currently passes `NULL`), have `nrf_scan_request` call `xTaskNotifyGive`, and block in
+`ulTaskNotifyTake(pdTRUE, portMAX_DELAY)` in the loop. Future `*_service()` calls can share the
+same notification.
+**Effort:** S
+
+### 3. `storage_save` and `storage_save_config` report success without checking the write result
+**File/function:** `src/storage.cpp:storage_save` (`f.write(data, len)`), `storage_save_config` (`f.print(text)`)
+Both ignore the return value of the write. On a full or write-protected card, `f.write` returns
+fewer bytes than requested (or 0), yet `storage_save` still returns the new path, so callers
+such as `fwdump_action` and the capture saves show "saved" for a truncated or empty file.
+`storage_save_config` returns `true` the same way. Fix: compare the returned count with `len`
+(and `strlen(text)`), `SD.remove` the partial file, and return `""`/`false` so the UI can say
+"SD write failed".
+**Effort:** S
+
+### 4. NRF24 absence is latched at first touch, so a module that wasn't ready then stays "not detected" until reboot
+**File/function:** `src/nrf24_radio.cpp:ensure` (`s_begun = true` set before `radio.begin(&SPI)`), `nrf_present`
+`ensure()` sets `s_begun = true` first and then evaluates `radio.begin() && isChipConnected()`
+exactly once. `nrf_present()` (called from `tool_nrf_scan` and `nrf_rescan_action`) never retries,
+so a flaky first probe (module powered late, loose jumper reseated, SPI-B busy during bring-up)
+makes every NRF24 screen fall into its "demo - NRF24 not detected" branch until power cycle.
+BRINGUP.md already expects bring-up on a breadboard. Fix: only latch `s_begun` on success, or
+retry the probe at most once every few seconds when `!s_present`.
+**Effort:** S
+
+### 5. LVGL uses one 320x40 draw buffer and a synchronous, non-DMA `pushColors` flush
+**File/function:** `src/main.cpp:flush_cb`, `setup()` (`lv_disp_draw_buf_init(&draw_buf, buf1, NULL, SCR_W * 40)`), `platformio.ini` TFT_eSPI flags
+`flush_cb` pushes each chunk with `tft.pushColors` while holding `spi_a_mutex`, and the second
+buffer argument to `lv_disp_draw_buf_init` is `NULL`. LVGL therefore cannot render the next
+strip while the previous one is on the wire; a full-screen transition (the 150 ms MOVE_* anim in
+`nav`) renders and transfers strictly in series. `platformio.ini` sets 40 MHz SPI but no DMA
+use anywhere (grep for `initDMA`/`pushPixelsDMA` is empty), while the board has 8 MB PSRAM
+(and internal RAM for a second 25 KB buffer). Fix: add a second `buf2`, call `tft.initDMA()`
+in `setup()`, push with `pushPixelsDMA` and call `lv_disp_flush_ready` once the transfer
+completes. SD access on the shared bus must wait for DMA done, so keep the `spi_a_mutex`
+held until then. Needs on-hardware verification of the SPI-A sharing.
+**Effort:** M
