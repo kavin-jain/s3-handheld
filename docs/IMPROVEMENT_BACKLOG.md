@@ -362,3 +362,50 @@ in `setup()`, push with `pushPixelsDMA` and call `lv_disp_flush_ready` once the 
 completes. SD access on the shared bus must wait for DMA done, so keep the `spi_a_mutex`
 held until then. Needs on-hardware verification of the SPI-A sharing.
 **Effort:** M
+
+## 2026-10-10
+
+### 1. `pm_tick()` can drop the device into light sleep while an async tool scan is still mid-flight
+**File/function:** `src/main.cpp:pm_tick` (around line 449-482), vs. `g_tool_timer`
+`pm_tick()` only looks at `idle = millis() - last_input_ms` against `g_dim_s`/`g_sleep_s`; it
+never checks whether `g_tool_timer` (the active poll timer every async scan — `wifi_poll_cb`,
+`ble_poll_cb`, `nrf_scan_poll_cb`, `camera_poll_cb`, `ir_poll_cb`, …) is non-null before calling
+`esp_light_sleep_start()`. Starting a scan does not reset `last_input_ms` on its own, so a user
+who starts a multi-second scan (BLE, WiFi, nRF24 band sweep) and then sets a short `sleep_s`
+(the only enforced floor is `dim_s + 5`, via `sanitize_sleep_dim()`) and walks away will have
+the chip halt into light sleep mid-scan — freezing whatever's in flight on core 0/the radio
+task and leaving the poll timer to resume against stale/incomplete state on wake. Fix: gate the
+`PM_DIM -> PM_SLEEP` transition (and ideally the `PM_ACTIVE -> PM_DIM` one) on `g_tool_timer ==
+nullptr`, or have each async scan push its own last-activity timestamp.
+**Effort:** S
+
+### 2. `nfc_crack_block`'s dictionary read desyncs after any keys.dic line longer than 23 characters
+**File/function:** `src/nfc_pn532.cpp:nfc_crack_block`
+The read loop is `size_t n = f.readBytesUntil('\n', line, sizeof(line) - 1);` with `char
+line[24]`, i.e. at most 23 bytes per call. `nfc_parse_key` (`src/nfc_keys.h`) correctly allows
+`#`-comment lines of any length, but `readBytesUntil` does **not** consume the rest of an
+over-length line once it hits its 23-byte cap — it just returns what it has, leaving the
+remaining bytes of that same line (up to and past the real `\n`) sitting in the file. The next
+loop iteration's `readBytesUntil` call then reads that leftover tail as if it were the start of
+the next line, which `nfc_parse_key` will reject as garbage — silently skipping the dictionary
+entry that actually followed the long line. Any keys.dic with a comment/header line over 23
+characters (very easy to write by hand) quietes-fails to crack keys that are otherwise present.
+Fix: size `line` to the longest realistic dictionary line (comments included) or explicitly
+drain the remainder of an over-length line (loop `f.read()` until `'\n'` or EOF) before parsing
+the next one.
+**Effort:** S
+
+### 3. WiFi scans never call `WiFi.scanDelete()`, leaking the previous scan's heap allocation on every rescan
+**File/function:** `src/wifi_scan.cpp:wifi_scan_async` / `wifi_scan_complete`
+`wifi_scan_async()` just calls `WiFi.scanNetworks(true)` and `wifi_scan_complete()` just reads
+`WiFi.scanComplete()` — `scanDelete()` is never called anywhere in the codebase (confirmed by
+grep across `src/`). Every tool that scans WiFi (`tool_wifi_scan`, `tool_camera`,
+`tool_tracker_hunt`'s WiFi half, wardrive's recon, etc.) re-triggers `wifi_scan_async()` on
+rescan/re-entry per the existing "click = rescan: re-enter the screen" pattern noted at
+`src/main.cpp:1170`, without ever releasing the previous scan's internal `wifi_ap_record_t`
+array that the IDF Wi-Fi driver keeps allocated until `esp_wifi_scan_get_ap_records` /
+`scanDelete` frees it. Repeated rescanning (the normal way these tools are used) steadily grows
+heap usage for the life of the session. Fix: call `WiFi.scanDelete()` once the UI has read out
+the records it needs (right after building the result list in each `*_poll_cb`), before the
+next `wifi_scan_async()` call.
+**Effort:** S
