@@ -409,3 +409,65 @@ heap usage for the life of the session. Fix: call `WiFi.scanDelete()` once the U
 the records it needs (right after building the result list in each `*_poll_cb`), before the
 next `wifi_scan_async()` call.
 **Effort:** S
+
+## 2026-10-11
+
+### 1. `task_parse` can read one byte past a too-short line before checking it's there
+**File/function:** `src/tasks.h:task_parse` (line 11), fed by `src/main.cpp:1408`
+(`tool_tasks`, SD-loaded `/me/tasks.txt`)
+`task_parse`'s guard is `if (!line || line[0] != '[' || line[2] != ']') return false;` —
+it indexes `line[2]` as soon as `line[0] == '['`, without first confirming `line[1]`
+is non-NUL. For the 2-byte string `"["` (`line[0]='['`, `line[1]='\0'`), that reads
+`line[2]`, one byte past the string's own allocation, before the length is known to
+be long enough. The one call site in `main.cpp:1419-1423` happens to copy each line
+into a fixed `char line[64]` stack buffer first, so today's only caller is safe by
+accident (the extra byte is still inside that 64-byte array, just uninitialized
+stack garbage) — but the function itself, called directly (as a unit test or any
+future caller would, exactly like `nfc_parse_key` before its fix), has the same
+reads-a-fixed-offset-before-checking-length shape that bug had. Fix: check
+`line[1] == 0` (reject) before indexing `line[2]`, or check `!line[1] || !line[2]`
+up front.
+**Effort:** S
+
+### 2. "Drone spotter" never calls the OpenDroneID decoder it ships and tests — it only keyword-matches the BLE device name
+**File/function:** `src/main.cpp:2003` (`droneid_timer_cb`) vs. `src/droneid.h`
+(`odid_msg_type`, `le_i32`, `odid_coord`, `odid_basic_id`), tested by
+`test/test_droneid.cpp`
+`droneid.h`'s own header comment says it decodes "the operator/aircraft id and the
+live GPS position" out of an OpenDroneID Remote-ID beacon, and its four decode
+functions are fully implemented and unit-tested. But `droneid_timer_cb` (the only
+code path behind `tool_droneid`) never calls any of them — a repo-wide grep for
+`le_i32`/`odid_basic_id`/`odid_msg_type` outside `droneid.h`/`test/` has zero hits.
+Instead it does a plain BLE-name substring match (`ci_contains(n, "DJI")` /
+`"Drone"` / `"Mavic"`) against whatever `ble_scan_async` turns up and calls that
+"drone broadcast nearby" — a much weaker signal than decoding the actual Remote-ID
+payload (which carries a real operator/aircraft ID and GPS fix, not just a product
+name string many drones won't even advertise). Unlike the BRINGUP.md checklist item
+for this tool (which is about verifying RF reception on hardware), this gap needs no
+hardware: the already-tested decoder just needs to be run against the raw BLE
+advertisement bytes (the ODID Message Pack is carried in a BLE Service Data AD
+structure) instead of the device's advertised name. Fix: in `droneid_timer_cb`,
+pull each matched BLE device's raw advertisement payload and feed the ODID Message
+Pack through `odid_msg_type`/`odid_basic_id`/`le_i32`+`odid_coord`, same shape as
+how `flipper_ir_at` was wired into the IR browser.
+**Effort:** M
+
+### 3. Four tool screens duplicate the same "BLE async scan + poll timer + render" boilerplate with no shared helper
+**File/function:** `src/main.cpp` — `skimmer_timer_cb` (line 1950) / `tool_skimmer`
+(1981), `droneid_timer_cb` (2003) / `tool_droneid` (2032), `wof_poll_cb` (2308) /
+`tool_wof` (2316), and the equivalent pair behind `tool_tracker_hunt` (2332, same
+`ble_scan_complete()`-poll shape at line 2369)
+Each of these four screens independently repeats the same five-step pattern: call
+`ble_scan_async(N)`, start an `lv_timer_create(..., 200/500, ...)` poll callback,
+have that callback early-return while `!ble_scan_complete()`, delete/pause the
+timer and set `g_tool_timer`/`s_active_tool_timer` to null once it fires, then loop
+`for (i = 0; i < ble_count(); i++)` matching each device against a predicate
+(`is_skimmer_name`, a DJI/Drone/Mavic substring check, a Flipper/pwnagotchi
+heuristic, `ble_tracker_brand`). The only things that differ between the four are
+the predicate and the result labels — the scan-start/poll/teardown plumbing is
+copy-pasted each time (and already had to be fixed identically in more than one of
+them for the same leaked-timer/dead-ACTION class of bug noted in BRINGUP.md). Fix:
+factor the common shape into one helper, e.g. `ble_scan_and_poll(seconds, lv_timer_cb_t
+on_done)`, that owns the timer lifecycle and calls back once `ble_scan_complete()`
+is true, leaving each tool to supply only its predicate/render step.
+**Effort:** M
