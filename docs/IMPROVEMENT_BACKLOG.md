@@ -471,3 +471,37 @@ factor the common shape into one helper, e.g. `ble_scan_and_poll(seconds, lv_tim
 on_done)`, that owns the timer lifecycle and calls back once `ble_scan_complete()`
 is true, leaving each tool to supply only its predicate/render step.
 **Effort:** M
+
+## 2026-10-12
+
+### 1. `nfc_crack_block`'s SD read is the one SD access site in the codebase that never takes `spi_a_mutex`
+**File/function:** `src/nfc_pn532.cpp:nfc_crack_block` (`SD.open(dictPath)` / `f.readBytesUntil`,
+line 52-58), vs. every SD call in `src/storage.cpp` (`storage_begin`, `storage_save`,
+`storage_save_config`, `storage_nth_file`, `storage_read_file`, `storage_load_config`),
+which all wrap their `SD.open`/read/write in `xSemaphoreTakeRecursive(spi_a_mutex, ...)`.
+SD and the TFT share SPI-A (`storage.cpp`'s own header comment documents this and
+gates every other SD call on the mutex for exactly that reason), but `nfc_crack_block`
+dials the dictionary file straight off `SD.open()` with no mutex at all. Any
+`lv_timer_handler()` redraw (TFT `flush_cb`, which also takes `spi_a_mutex`) that lands
+mid-crack races an un-synchronized SD transaction against an in-flight display SPI
+transaction on the same bus. Fix: wrap the open/read/close in `nfc_crack_block` with the
+same `xSemaphoreTakeRecursive(spi_a_mutex, portMAX_DELAY)` / give pattern used throughout
+`storage.cpp`.
+**Effort:** S
+
+### 2. The second-core radio task is never registered with the task watchdog that `loop()` already uses
+**File/function:** `src/main.cpp:setup()` (`esp_task_wdt_init` / `esp_task_wdt_add(NULL)`,
+~line 2709-2712) vs. `src/radio_task.cpp:radio_task_start` /`radio_task_fn`
+`esp_task_wdt_add(NULL)` in `setup()` subscribes only the calling task — the Arduino
+loop task on core 1 — and `loop()` is the only place that calls `esp_task_wdt_reset()`.
+`radio_task_start()` is called right after, from that same core-1 context, but it only
+spins up `radio_task_fn` on core 0 via `xTaskCreatePinnedToCore`; nothing ever calls
+`esp_task_wdt_add()` for that new task handle, and `radio_task_fn`'s own loop
+(`nrf_scan_service(); vTaskDelay(20)`) never resets anything. So the watchdog this
+project already added covers the UI/main task but has no visibility at all into the
+core-0 radio task — if `nrf_scan_service()` or a future SPI-B user on that task ever
+deadlocks on `spi_b_mutex` (e.g. against a UI-task holder that itself stalls), the WDT
+that's supposed to panic+reboot the device never fires, since it was never watching that
+task. Fix: capture the `TaskHandle_t` from `xTaskCreatePinnedToCore` and add it with
+`esp_task_wdt_add(handle)`, resetting it from inside `radio_task_fn`'s own loop.
+**Effort:** S
