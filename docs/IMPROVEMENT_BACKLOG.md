@@ -505,3 +505,53 @@ that's supposed to panic+reboot the device never fires, since it was never watch
 task. Fix: capture the `TaskHandle_t` from `xTaskCreatePinnedToCore` and add it with
 `esp_task_wdt_add(handle)`, resetting it from inside `radio_task_fn`'s own loop.
 **Effort:** S
+
+## 2026-10-13
+
+### 1. USB host is a permanently hardcoded fake MBR — no real USB MSC driver is ever wired in
+**File/function:** `src/main.cpp:1374` (`tool_usbhost`)
+`tool_usbhost` builds a 512-byte MBR buffer entirely in the function body
+(`uint8_t mbr[512] = {0}; ... e[4] = 0x0C; e[9] = 0x08; ...` — a hand-crafted single
+FAT32 partition starting at LBA 2048) and feeds that same local array straight into
+`mbr_valid()`/`mbr_part_type()`/`mbr_part_sectors()`. There is no USB Host stack call
+anywhere in this function, no real MSC bulk-only transport read, and no SD-card
+passthrough despite the screen's own copy promising "browse & copy files to SD" —
+every visit to this screen shows the identical "drive mounted / P1 FAT32 1MB" result
+whether or not anything is even plugged into the USB-C port. Of all 61 tools this is
+the one with literally zero hardware path behind its headline claim (even the other
+bring-up demo screens read *something* live, e.g. `cc1101_rssi_at`/`nfc.begin()`).
+Needs the Arduino-ESP32 `USBHost`/MSC class wired to actually enumerate a connected
+drive and read its real MBR before this can leave "bring-up" status.
+**Effort:** L
+
+### 2. `nfc_write_ndef` never checks the write stays inside the tag's actual writable page range
+**File/function:** `src/nfc_pn532.cpp:37` (`nfc_write_ndef`)
+The function loops `for (size_t off = 0, pg = 4; off < len; off += 4, pg++)` and calls
+`nfc.ntag2xx_WritePage((uint8_t)pg, page)` for as many 4-byte pages as `len` needs,
+with no upper bound on `pg` at all. A real NTAG213 (the cheapest/most common blank
+NTAG the universal-remote-sized URL from `tool_ndef`/`ndef_uri_record` would be written
+to) only has user-memory pages 4-39 (144 bytes); NTAG215/216 go further but still end.
+Past the last user page, `ntag2xx_WritePage` is writing into the tag's lock bytes,
+CC, or configuration pages — depending on the tag and library return behavior this can
+either silently no-op, corrupt the tag's own capability container, or write into the
+dynamic-lock/config area (making the tag unreadable). There's currently nothing in
+this file stopping `tool_ndef` from calling it with a URL long enough to walk off the
+end of a real tag; it relies entirely on the PN532 library/tag firmware rejecting the
+out-of-range page, which is not guaranteed. Fix: take a `maxPage` (or tag-size) arg and
+`return false` before writing past it.
+**Effort:** S
+
+### 3. Mascot sprite frames are stored as 4-bytes-per-pixel RGBA for art that only uses a handful of colors
+**File/function:** `src/sprites_ryuk.c`, `src/sprites_misa.c`, `src/sprites_light.c`,
+`src/sprites_ir_beam.c`, `src/sprites_nfc_card.c` (each frame's `_map[]` array +
+`lv_img_dsc_t` with `.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA`)
+Every mascot frame (28x28px, e.g. `ryuk_0`/`ryuk_1` in `sprites_ryuk.c`) is declared
+`LV_IMG_CF_TRUE_COLOR_ALPHA`, LVGL's 4-bytes-per-pixel (BGRA) format — 28*28*4 = 3136
+bytes per frame, for pixel art that (reading `ryuk_0_map`/`ryuk_1_map` directly) uses
+only ~5 distinct RGB values plus fully-transparent `0,0,0,0` background, repeated in
+solid runs. Across the 16 total `TRUE_COLOR_ALPHA`-tagged frames in `src/sprites_*.c`
+that's roughly 48-50 KB of flash (`.rodata`) that an `LV_IMG_CF_INDEXED_4BIT` (16-color
+palette + 1 alpha bit per pixel, or `INDEXED_8BIT` for safety margin) encoding would
+cut by 70-85%, freeing flash for the IRDB/AC-brand tables or future features without
+any visual difference, since none of these sprites exceed a 16-color palette.
+**Effort:** M
