@@ -555,3 +555,20 @@ palette + 1 alpha bit per pixel, or `INDEXED_8BIT` for safety margin) encoding w
 cut by 70-85%, freeing flash for the IRDB/AC-brand tables or future features without
 any visual difference, since none of these sprites exceed a 16-color palette.
 **Effort:** M
+
+## 2026-10-14
+
+### 1. Bus Pirate's I2C scan runs its full blocking probe loop directly in the render path
+`src/main.cpp:i2c_scan_paint` (called from `tool_buspirate`, both on screen-entry and on every ACTION rescan) loops `Wire.beginTransmission`/`endTransmission` synchronously over all 112 addresses (0x08-0x77) with no `lv_timer_create` poll wrapper around it, unlike every other scan-style tool in the file. Each `endTransmission()` can take several ms when a device NAKs or the bus is busy, so this is the same "blocking call with no poll loop" pattern already fixed twice in `ble_scan`-based tools, just on I2C instead of BLE/radio. Effort: S.
+
+### 2. ESP-NOW mesh screen never refreshes after first paint
+`src/main.cpp:tool_espnow` builds its "N messages received" / last-message labels once from `espnow_rx()`/`espnow_last()` on screen entry and installs no `lv_timer_create` poll callback, so an incoming broadcast received while the screen is open never updates `g_espnow_status` or the message labels — the user has to leave and re-enter the screen to see new traffic land. Every other live-data screen in this file (WiFi, BLE, NRF24, tracker, wof) uses a `lv_timer_create(..._poll_cb, ...)` to re-paint; this one doesn't. Effort: S.
+
+### 3. Frequency finder's RSSI reading never ticks on its own — only on encoder rotation
+`src/main.cpp:tool_freq_finder`/`freq_paint`: RSSI is sampled once at screen-entry and again only from `g_edit_cb = freq_paint` on each encoder tick (`g_edit_val`/`g_edit_cb` wiring further down in the same function). There's no `lv_timer_create` to re-sample the currently-selected band's RSSI while the user holds still watching a signal — the bar and dBm reading go stale the moment the encoder stops moving, unlike the Bug Sweep or Direction finder screens which keep sampling. Effort: S.
+
+### 4. `radio_task_fn` only services NRF24 — CC1101 RSSI/capture polling still runs entirely on the UI task
+`src/radio_task.cpp:radio_task_fn` calls `nrf_scan_service()` every 20ms on core 0, but every CC1101 operation (`cc1101_rssi_at` in `src/radio_cc1101.cpp`, called from `freq_paint`, `tool_bug_sweep`'s `audiobug_timer_cb`, and the sub-GHz capture poll in `src/main.cpp`) still executes synchronously on the LVGL/UI task via `lv_timer_create` callbacks. The comment at the top of `radio_task.cpp` frames this task as the home for "every blocking SPI-B sweep," but CC1101 sweeps were never actually moved there — only NRF24 was. This leaves the same single-core contention for Sub-GHz band scans that the second core was meant to relieve. Effort: M.
+
+### 5. `espnow_msg.h`'s frame functions have no host unit test
+`test/` covers every other pure-logic codec in the repo (`test_ducky.cpp`, `test_handshake.cpp`, `test_gatt_uuid.cpp`, etc.) but there is no `test_espnow_msg.cpp` for `src/espnow_msg.h`'s `espnow_frame`/`espnow_parse`, despite both being small `static inline` pure functions (frame-build + XOR-checksum validate/extract) that are exactly the shape the ASan/UBSan host-test harness in `test/run_all.sh` is built for — malformed-length, truncated-buffer and bad-checksum cases are each one-line test cases, the same style that caught the `nfc_parse_key` off-by-one in this suite before. Effort: S.
