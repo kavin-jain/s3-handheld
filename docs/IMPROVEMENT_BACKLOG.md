@@ -586,3 +586,30 @@ any visual difference, since none of these sprites exceed a 16-color palette.
 ### 3. ESP-NOW peer registration failure is silently ignored, so the mesh can report "ready" while broadcast send always fails
 `src/espnow_mesh.cpp:39` (`espnow_begin`) calls `esp_now_add_peer(&peer)` and discards its return value, then unconditionally sets `s_on = true` and returns `true`. If that call fails — e.g. `ESP_ERR_ESPNOW_FULL`, `ESP_ERR_ESPNOW_EXIST` from a stale peer table entry surviving a soft reset, or `ESP_ERR_ESPNOW_NOT_INIT` on an init race — `espnow_active()` (checked at `src/main.cpp:1362` before calling `espnow_begin()` again) still reports the mesh as up, and every later `espnow_broadcast()` (`src/espnow_mesh.cpp:48`) calls `esp_now_send(BCAST, f, n)` against a peer that was never actually added, which `esp_now_send` itself will reject. The UI has no way to learn this happened — "ESP-NOW mesh" just looks like it's working while silently dropping every message. Fix: check `esp_now_add_peer`'s return, and only set `s_on = true` (or report it) on success.
 **Effort:** S
+
+## 2026-10-16
+
+### 1. Status-bar battery % is a one-shot snapshot and nothing reacts to a low battery
+**File/function:** `src/main.cpp:622` (`build_statusbar`), `src/battery.cpp:batt_pct`
+`build_statusbar` reads `batt_pct()` once, formats it into a plain label, and is only called while a screen is being built (`src/main.cpp:747`). There is no `lv_timer` that refreshes it. `batt_pct()` has no other caller in the tree (only `src/main.cpp:638`). So on a long-lived screen such as a scan or the idle home screen, the percentage never changes until you navigate away. The icon is also hardcoded to `LV_SYMBOL_BATTERY_FULL`, and `pm_tick` never looks at battery level. A 3.7 V cell can sag into brown-out mid-SD-write with no warning. Fix: add a slow (about 30 s) timer that updates the label text and symbol, plus a low-battery threshold that dims early and warns before saves.
+**Effort:** S
+
+### 2. `wifi_save_action` silently truncates the CSV at 512 bytes and does not quote SSIDs
+**File/function:** `src/main.cpp:1159` (`wifi_save_action`)
+It builds the CSV in a fixed `char body[512]` and stops the loop at `o < sizeof body - 80`, so roughly the first 10-12 networks are saved and the rest are dropped with no indication. The status line still shows the saved path. Rows are written as `%s,%s,%d,%d`, so an SSID containing a comma or newline (both legal) shifts the columns for that row and corrupts the file for any parser. Fix: stream rows to the file in chunks, or at least size `body` from `wifi_count()`. Quote SSIDs with RFC-4180 escaping. A pure `csv_escape` helper in `strutil.h` would be host-testable.
+**Effort:** S
+
+### 3. `ir_send_flipper` sends Flipper `NEC42` records as 32-bit NEC
+**File/function:** `src/ir_remote.cpp:66` (`ir_send_flipper`)
+The branch `strcmp(p,"NEC") || "NECext" || "NEC42"` collapses all three into `irsend.sendNEC(irsend.encodeNEC(a16, c16))`, using only the low 16 bits of address and command. NEC42 is a different, longer frame (13-bit address and command fields). Sending it as a 32-bit NEC frame will not be recognised by the target device and silently reports `true` (success). Fix: drop `NEC42` from this branch so it falls through to `return false` ("not yet mapped"), or build the 42-bit frame explicitly. Either way, add a case to `test/test_flipper_ir.cpp`'s protocol-mapping coverage.
+**Effort:** S
+
+### 4. `rcs_decode` has no 32-bit cap, so long captures corrupt the code and replay shifts out of range
+**File/function:** `src/subghz_replay.h:77` (`rcs_decode`), consumed by `src/radio_cc1101.cpp:subghz_replay`
+`rcs_decode` shifts into a `uint32_t code` for every valid pulse pair (`code = (code << 1) | b`) and counts `bits` with no upper limit, then returns `bits_out = (uint8_t)bits`. `SGX_MAX` is 300 edges, so up to about 149 pairs can be accepted. For a valid frame longer than 32 bits, `code` silently keeps only the last 32 bits while `bits` reports the real length. `subghz_replay` then runs `(code >> i)` with `i` up to `bits-1`, which is undefined behaviour for `uint32_t` when `i >= 32`. `subghz_save_action` also writes a `.sub` file whose `bits:` header does not match its `code:`. Fix: reject (or clamp to) `bits > 32` inside `rcs_decode` and add a >32-bit case to `test/test_subghz_replay.cpp`, which today only covers a 24-bit frame and junk.
+**Effort:** S
+
+### 5. `loop()` spins at ~200 Hz regardless of LVGL's next-timer deadline, including while dimmed
+**File/function:** `src/main.cpp:2828` (`loop`), `pm_tick` (`src/main.cpp:449`)
+`loop()` calls `lv_timer_handler()` and then a fixed `delay(5)`, discarding the return value, which is LVGL's ms-until-next-timer hint. In `PM_DIM` the CPU drops to 80 MHz but the loop still wakes every 5 ms with the screen mostly static. True light sleep only starts after `g_sleep_s`. Fix: use the returned value (clamped, e.g. 5 to 30 ms active and up to 50 ms in `PM_DIM`) as the delay. Keep the cap low enough that `enc_rearm_tick` and the 30 ms `poll_buttons` timer stay responsive.
+**Effort:** S
