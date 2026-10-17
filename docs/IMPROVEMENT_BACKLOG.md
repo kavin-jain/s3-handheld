@@ -613,3 +613,30 @@ The branch `strcmp(p,"NEC") || "NECext" || "NEC42"` collapses all three into `ir
 **File/function:** `src/main.cpp:2828` (`loop`), `pm_tick` (`src/main.cpp:449`)
 `loop()` calls `lv_timer_handler()` and then a fixed `delay(5)`, discarding the return value, which is LVGL's ms-until-next-timer hint. In `PM_DIM` the CPU drops to 80 MHz but the loop still wakes every 5 ms with the screen mostly static. True light sleep only starts after `g_sleep_s`. Fix: use the returned value (clamped, e.g. 5 to 30 ms active and up to 50 ms in `PM_DIM`) as the delay. Keep the cap low enough that `enc_rearm_tick` and the 30 ms `poll_buttons` timer stay responsive.
 **Effort:** S
+
+## 2026-10-17
+
+### 1. "Tracker on me?" and Wall of Flipper show any non-empty BLE cache as if it were a fresh scan
+**File/function:** `src/main.cpp:2378` (`tool_tracker`), `src/main.cpp:2318` (`tool_wof`), `src/ble_scan.cpp:66` (`ble_count`)
+Both handlers do `if (ble_count() > 0) { render(cached); return; }` under a "cached from a recent scan" comment, but `s_count` in `ble_scan.cpp` is never aged or cleared — it keeps whatever the last `scan_done_cb` stored, from any screen. So after one Bluetooth scan, "Tracker on me?" answers instantly from that old data and never starts `ble_scan_async`. For an "am I being followed" check, a result from minutes ago (or another location) is misleading. Fix: record `millis()` in `scan_done_cb`, expose `ble_scan_age_ms()`, and only reuse the cache under ~10 s.
+**Effort:** S
+
+### 2. Tracker hunt scores a hardcoded Apple advertisement and never scans
+**File/function:** `src/main.cpp:2332` (`tool_tracker_hunt`), `src/ble_track.h` (`ble_tracker_brand`, `ble_company_id`)
+`tool_tracker_hunt` builds `demo[] = {0x4C,0x00,0x12,0x19}` and passes it to `ble_company_id`/`ble_tracker_brand`, so the "nearest:" line always reads Apple regardless of what is nearby, and no scan or RSSI is read despite the "RSSI rises as you near it" text. The only caller of these two helpers is this demo — `scan_done_cb` in `ble_scan.cpp` calls just `ble_is_airtag`, so Tile/SmartTag detection promised by the "find AirTag / Tile / SmartTag" label has no live path. Fix: keep company id/brand per device in `ble_scan.cpp`, and give the hunt screen an `lv_timer_create` poll that tracks the strongest tracker's RSSI.
+**Effort:** M
+
+### 3. iButton screen reports "crc ok" for a ROM it fabricates itself
+**File/function:** `src/main.cpp:2222` (`tool_ibutton`)
+The handler fills `rom[]` with constants, computes `rom[7] = onewire_crc8(rom, 7)`, then displays `ibutton_valid(rom) ? "ok" : "bad"` — which can only ever be "ok". Grep finds no 1-Wire driver or pin definition anywhere in `src/`/`include/pins.h`, so nothing is read from hardware. Same demo-as-feature class as the wardrive finding. Fix: until a bit-bang reader exists, show "not implemented" (like `tool_transit`'s absent-hardware branch) instead of a green CRC that looks like a real read.
+**Effort:** S (honest label) / L (actual 1-Wire reader)
+
+### 4. ESP-NOW receive callback writes `s_last` on the WiFi task while the UI task reads it
+**File/function:** `src/espnow_mesh.cpp:handle` (`strncpy(s_last, …)`, `s_rx++`), read via `espnow_last()` from `src/main.cpp:1367` (`tool_espnow`)
+`on_recv` runs in the WiFi/ESP-NOW task context; `handle` copies into the 64-byte static `s_last` with no lock or sequence guard, and `tool_espnow` hands `espnow_last()`'s pointer straight to `make_label` on the UI task. A message arriving mid-render can yield a torn string (half old, half new text), and `s_rx` is a non-volatile counter shared the same way. Fix: double-buffer with a sequence counter (or a small critical section) and have `espnow_last` copy into a caller buffer.
+**Effort:** S
+
+### 5. Config clamping lives inline in `setup()`, so the invariants the PIN/timer fixes rely on have no host test; `theme` is a dead field
+**File/function:** `src/main.cpp:2744-2757` (`setup()` restore block), `src/config.h` (`DeviceCfg`, `cfg_serialize`), `test/test_config.cpp:43`
+The brightness 10–100, dim 5–120, sleep 10–300, `sleep > dim`, and pin −1/0–9999 rules are re-implemented in `setup()` after `cfg_parse`, and the test file explicitly documents that `cfg_parse` does no clamping — so none of these rules is exercised under the ASan/UBSan host suite. Separately, `theme` is serialized as a literal `0` in `save_config_now` (`main.cpp:402`), ignored on load, and the Settings row says "only theme". Fix: add `cfg_clamp(DeviceCfg*)` to `config.h` (reusing `pwr_clamp`), call it from `setup()`, add tests for hostile values (`bright=-5;dim=9999;sleep=1;pin=12345`), and drop or implement `theme`.
+**Effort:** S
