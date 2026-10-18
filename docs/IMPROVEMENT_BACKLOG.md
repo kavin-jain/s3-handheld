@@ -640,3 +640,30 @@ The handler fills `rom[]` with constants, computes `rom[7] = onewire_crc8(rom, 7
 **File/function:** `src/main.cpp:2744-2757` (`setup()` restore block), `src/config.h` (`DeviceCfg`, `cfg_serialize`), `test/test_config.cpp:43`
 The brightness 10–100, dim 5–120, sleep 10–300, `sleep > dim`, and pin −1/0–9999 rules are re-implemented in `setup()` after `cfg_parse`, and the test file explicitly documents that `cfg_parse` does no clamping — so none of these rules is exercised under the ASan/UBSan host suite. Separately, `theme` is serialized as a literal `0` in `save_config_now` (`main.cpp:402`), ignored on load, and the Settings row says "only theme". Fix: add `cfg_clamp(DeviceCfg*)` to `config.h` (reusing `pwr_clamp`), call it from `setup()`, add tests for hostile values (`bright=-5;dim=9999;sleep=1;pin=12345`), and drop or implement `theme`.
 **Effort:** S
+
+## 2026-10-18
+
+### 1. `tool_transit` never uses `transit.h`'s own balance helpers
+**File/function:** `src/main.cpp:2234` (`tool_transit`) vs. `src/transit.h` (`le_u32`, `fmt_rupees`)
+`transit.h` exists specifically to decode a card's balance block (`le_u32` pulls the little-endian paise field, `fmt_rupees` formats it as "Rs 245.50") and both are exercised by `test/test_transit.cpp`. But `tool_transit` in `main.cpp` only ever calls `nfc_read_uid()` and shows "card present - reading balance..." — it never reads a balance block and never calls either helper, so the screen can't actually show a balance even in demo form, unlike every other NFC/Sub-GHz tool that at least seeds `g_sub_*`/demo fields with a value its format function can render. Fix: add a demo/SD-fallback balance (same pattern `tool_subghz_capture` uses for `g_sub_code`) so the screen's own helpers get exercised and the UI shows more than a UID.
+**Effort:** S
+
+### 2. ISM decoder and wM-Bus meter never check for a live CC1101, unlike every other Sub-GHz tool
+**File/function:** `src/main.cpp:982` (`tool_ism`) and `src/main.cpp:998` (`tool_wmbus`)
+Every other Sub-GHz screen (`tool_freq_finder`, `tool_subghz_capture`, `tool_df`) branches on `cc1101_present()` to show live data when the radio answers and a clearly-labelled demo otherwise. `tool_ism` and `tool_wmbus` never call `cc1101_present()` at all — they unconditionally decode the same hardcoded `code`/`hdr[]` byte arrays on every render, so there is no path by which a real captured PT2262 gate code or wM-Bus frame could ever reach `pt2262_tristate`/`wmbus_manuf`/`wmbus_medium`. These two are the only Sub-GHz tools with zero live branch. Fix: gate on `cc1101_present()` and feed captured bytes (reusing the `subghz_capture_poll`/CC1101 async-RX path already built for the Capture & replay screen) when available.
+**Effort:** M
+
+### 3. Battery gauge is probed once at boot with no retry, unlike the NFC/NRF24 "I2C race" fixes already applied
+**File/function:** `src/battery.cpp:batt_begin`, called once from `src/main.cpp:2807` (`setup()`); read via `batt_present()`/`batt_pct()` at `src/main.cpp:637` (`build_statusbar`)
+`nfc_begin()` already has a documented retry path (`nfc_retry_action`/`nfc_retry_poll_cb` in `main.cpp`, added specifically because "if the PN532 handshake lost the race at boot, this screen was stuck... until reboot"), and NRF24 absence latching at first touch is already a tracked backlog item (2026-10-09 #4). `batt_begin()` has the identical shared-I2C-bus boot-race exposure (`gauge.begin(&Wire)` right after Wire is started) but is called exactly once in `setup()` with no retry anywhere — `build_statusbar` just calls `batt_present()` every redraw, so if the MAX17048 doesn't answer during that first narrow window, the battery icon never appears for the rest of the session, with no retry call or ACTION binding to recover it. Fix: same shape as `nfc_retry_poll_cb` — retry `batt_begin()` on a slow timer (or from `pm_tick`) until it succeeds.
+**Effort:** S
+
+### 4. "See through wall" always renders the same fixed 8-sample window — it never changes with time or input
+**File/function:** `src/main.cpp:1221` (`tool_csi`) vs. `src/csi_motion.h` (`csi_variance`, `csi_motion`)
+`tool_csi` builds the identical `float win[8] = {40,60,42,58,39,61,41,59}` literal every single time the screen is entered or redrawn, runs it through the host-tested `csi_variance`/`csi_motion`, and always prints the same "MOTION DETECTED" + "CSI variance 155" — there is no `esp_wifi` CSI callback, no timer, no randomization, nothing that varies the sample. Every other "bring-up demo" screen in the file at least seeds its one-shot demo state once and calls it a static reading; this one is presented as if it's live sensing ("ambient WiFi channel-state sensing") with a result that can never change no matter how long the screen stays open. Fix: at minimum perturb the demo window from `millis()` or a free-running counter so repeated visits don't show byte-identical "live" output, pending the real CSI callback.
+**Effort:** S
+
+### 5. GATT explore only ever resolves 4 of its own lookup table's 11 known services and never attempts a real connection
+**File/function:** `src/main.cpp:2277` (`tool_gatt`) vs. `src/gatt_uuid.h` (`gatt_service_name`)
+`gatt_service_name` maps 11 well-known 16-bit service UUIDs to names, but `tool_gatt`'s `static const uint16_t demo[] = {0x1800, 0x180A, 0x180F, 0x180D}` only ever looks up 4 of them, hardcoded, on every render — there is no BLEClient connect, no service discovery, and no path for a selected/scanned device (from `tool_ble_scan` or `tool_wof`, which already run real `ble_scan_async`) to be fed into this screen at all. Unlike `tool_ble_scan`, which at least performs a real scan, this tool performs no BLE operation whatsoever despite its name promising "explore". Fix: accept a device from the BLE scan list (same navigation pattern `nfc_crack_nav_action` uses to hand off between NFC screens) and wire a real `BLEClient::connect()` + `getServices()` walk through `gatt_service_name`.
+**Effort:** M
