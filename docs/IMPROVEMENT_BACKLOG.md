@@ -680,7 +680,44 @@ Every other Sub-GHz screen (`tool_freq_finder`, `tool_subghz_capture`, `tool_df`
 `nrf_mousejack_inject(addr, channel, frames, n)` in `nrf24_radio.cpp` is a complete, already-tested (`mousejack_stream` is covered by `test/test_mousejack.cpp`) implementation that opens a writing pipe at a sniffed dongle address and transmits the HID frames with proper ESB pacing (`delayMicroseconds(1200)` between reports) — but a repo-wide search shows it has zero callers. `tool_mousejack` builds the frame stream with `mousejack_stream(0x00, payload, frames, 48)` and shows "payload -> N HID frames", then stops; it never has a sniffed address/channel to inject with and never calls `nrf_mousejack_inject` at all, unlike e.g. `tool_subghz_capture`'s capture→replay hookup, which is the shape this screen is missing. Right now the single wired-up NRF24 tool (`tool_mousejack`) can never actually inject a keystroke on real hardware no matter how it's used. Fix: wire a sniff step (snoop ESB traffic on `nrf_scan`'s busiest channel for a Logitech/Microsoft dongle address) ahead of the existing frame-build, then call `nrf_mousejack_inject` with the result on click, the same bring-up shape `wifi_deauth_tx`/`subghz_replay_action` already use elsewhere.
 **Effort:** M
 
-## 2026-10-22
+## 2026-10-24
+
+### 1. `storage_save` re-walks the entire destination directory on every single save
+**File/function:** `src/storage.cpp:61` (`next_seq`), called from `src/storage.cpp:75` (`storage_save`)
+Every save — NFC UID, WiFi CSV, Sub-GHz capture, .ir record, firmware dump chunk — calls
+`next_seq(kind)` first, which opens the kind's folder and calls `openNextFile()` across
+every existing entry just to find `max(seq)+1`, under `spi_a_mutex` the whole time. On a
+folder that's accumulated hundreds of captures this is an O(n) SD directory walk (SD card
+`openNextFile()` is not cheap) blocking the UI task once per ACTION press, and it only gets
+slower the more the device is actually used. A monotonic counter cached in RAM (seeded once
+from the same walk at `storage_begin()`/first save per kind) would make every later save O(1).
+**Effort:** M
+
+### 2. `amiibo_id_hex` has no bounds/null check, unlike its own sibling functions in the same file
+**File/function:** `src/amiibo.h:35` (`amiibo_id_hex`), called from `src/main.cpp:1036` (`tool_amiibo`)
+`ntag215_is_amiibo` and `ntag215_uid_valid` right above it both guard with
+`if (!d || n < NTAG215_SIZE) return false;`, but `amiibo_id_hex(const uint8_t *d, char
+out[17])` takes no length at all and unconditionally reads `d[AMIIBO_ID_OFF + i]` for
+`i` in 0..7 (offset 0x54..0x5B). Today it's only ever called with a fixed
+`uint8_t d[NTAG215_SIZE]` demo buffer in `tool_amiibo`, so it's harmless now — but the moment
+a real PN532 dump is wired in (the file's own header says that's the next step) and that dump
+comes back short or truncated (torn read, wrong tag type tapped), this reads past the buffer
+with nothing to stop it. Give it the same `(const uint8_t *d, size_t n)` guard as its siblings.
+**Effort:** S
+
+### 3. Karma/MANA and Evil Portal are pure hardcoded demo data — no SoftAP, DNS, or HTTP server ever runs
+**File/function:** `src/main.cpp:tool_karma` and `src/main.cpp:tool_evilportal`
+Both screens only format a compile-time-constant probe request (`"CoffeeShop"`) /
+compile-time-constant POST body (`"user=alice&pass=hunter%402"`) through their respective
+pure parsers (`ie_get_ssid`, `form_get`) and print the result — there is no `WiFi.softAP()`,
+no DNS responder, and no HTTP server anywhere in either function or reachable from it. Unlike
+most of the other WiFi/BLE tools, which at least call a real `*_scan_async`/`*_begin`, these
+two never touch the radio at all, so the "awareness testing" screens can't actually be run
+against a phone yet. Lowest-risk next step is the SoftAP + a single static captive page for
+Evil Portal (Karma's auto-respond-to-any-SSID needs real-ish 802.11 probe/beacon handling and
+is a bigger lift) — flagging both here as the same category of gap.
+**Effort:** L
+
 
 ### 1. "Intensity dial" (TX power) only applies once per boot on three of the four radios
 **File/function:** `src/wifi_scan.cpp:10` (`ensure_begin`), `src/deauth_detect.cpp:18` (`deauth_begin`), `src/nrf24_radio.cpp:20` (`ensure`)
