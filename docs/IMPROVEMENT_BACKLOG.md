@@ -680,7 +680,19 @@ Every other Sub-GHz screen (`tool_freq_finder`, `tool_subghz_capture`, `tool_df`
 `nrf_mousejack_inject(addr, channel, frames, n)` in `nrf24_radio.cpp` is a complete, already-tested (`mousejack_stream` is covered by `test/test_mousejack.cpp`) implementation that opens a writing pipe at a sniffed dongle address and transmits the HID frames with proper ESB pacing (`delayMicroseconds(1200)` between reports) — but a repo-wide search shows it has zero callers. `tool_mousejack` builds the frame stream with `mousejack_stream(0x00, payload, frames, 48)` and shows "payload -> N HID frames", then stops; it never has a sniffed address/channel to inject with and never calls `nrf_mousejack_inject` at all, unlike e.g. `tool_subghz_capture`'s capture→replay hookup, which is the shape this screen is missing. Right now the single wired-up NRF24 tool (`tool_mousejack`) can never actually inject a keystroke on real hardware no matter how it's used. Fix: wire a sniff step (snoop ESB traffic on `nrf_scan`'s busiest channel for a Logitech/Microsoft dongle address) ahead of the existing frame-build, then call `nrf_mousejack_inject` with the result on click, the same bring-up shape `wifi_deauth_tx`/`subghz_replay_action` already use elsewhere.
 **Effort:** M
 
-## 2026-10-25
+## 2026-10-28
+
+### 1. DuckyScript key-combo lines ("CTRL ALT DELETE", "ALT F4") parse correctly but silently do nothing on BadUSB
+**File/function:** `src/badusb.cpp:30` (`badusb_run_line`, `default:` case) vs. `src/ducky.h:34` (`ducky_parse`, `DK_KEYCOMBO`)
+`ducky_parse()` already recognizes any line that isn't REM/STRING/DELAY/ENTER/GUI as `DK_KEYCOMBO` and returns its full text (e.g. "CTRL ALT DELETE") in `arg` — this is tested and correct (`test/test_ducky.cpp`). But `badusb_run_line()`'s switch has no `case DK_KEYCOMBO:` at all; it falls into `default: break;` with a comment "REM / NONE / KEYCOMBO (multi-key combos: later)". So any script line that isn't one of the five handled keywords — which covers most real DuckyScript payloads using modifier combos — is a silent no-op: the tool reports success but types nothing for that line. Fix: parse the space-separated modifier/key tokens in `arg` (map modifier names via a small lookup, final token via `ascii_to_hid`/a keycode table) and press/release them as a chord in `badusb_run_line`.
+**Effort:** M
+
+### 2. `pt2262_tristate` has no output-buffer capacity check and can overflow the caller's stack buffer once more than 30 bits are decoded
+**File/function:** `src/pt2262.h:11` (`pt2262_tristate`), called from `src/main.cpp:985` (`tool_ism`) with `char tri[16]`
+`pt2262_tristate(uint32_t code, int nbits, char *out)` writes `nbits/2` tri-state chars plus a NUL into `out`, taking no `cap` argument and doing no bounds check against the caller's buffer — it trusts `out` is at least `nbits/2 + 1` bytes. The one call site today passes a hardcoded `bits = 24` into `tri[16]` (fits, 13 bytes used), so it's silent today, but `tool_ism` is already flagged (2026-10-18 #2) as needing a real capture (`cc1101_present()`/`subghz_capture_poll`) instead of that hardcoded demo value — once that's wired up, a captured frame of 32 bits (a full `uint32_t`, which `rcs_decode` can produce) yields `sym=16` and writes `out[16]`, one byte past `tri[16]`'s end: a stack buffer overflow. Fix: add a `size_t cap` parameter to `pt2262_tristate` and clamp `sym` to `cap - 1` before writing, the same pattern every other formatter in this codebase (`fmt_rupees`, `nfc_uid_hex`, `cfg_serialize`) already follows.
+**Effort:** S
+
+
 
 ### 1. `nfc_poll_cb` and `ir_poll_cb` still block the UI task on every tick, just for a bounded time instead of one big sweep
 **File/function:** `src/main.cpp:1117` (`nfc_poll_cb`) calling `src/nfc_pn532.cpp:26` (`nfc_read_uid`); `src/main.cpp:1656` (`ir_poll_cb`) calling `src/ir_remote.cpp:33` (`ir_learn`)
