@@ -772,3 +772,10 @@ All three read `power_level()` and apply it (`esp_wifi_set_max_tx_power` / `radi
 **File/function:** `src/main.cpp:168` (`tool_wip`), `:170` (`tool_kbdsniff`), `:171` (`tool_bandscan`), `:173` (`tool_hid`), `:187` (`tool_fido`)
 These five `static void tool_*(lv_obj_t*);` forward declarations exist in the function-prototype block at the top of `main.cpp`, but none of them has a matching definition anywhere in the file, and none is referenced by name again (not in the `TOOLS[]`/`Tool` table, not as a callback, nothing) — confirmed by `grep -n` for each name returning only its own declaration line. They compile only because nothing ever calls them; removing them (or replacing with a real `tool_generic` entry plus a definition if the feature is actually planned) would be purely cosmetic but lets the prototype block stop claiming five screens exist that don't.
 **Effort:** S
+
+## 2026-10-29
+
+### 1. `odid_basic_id` reads 20 bytes past the message header with no length check on the source buffer
+**File/function:** `src/droneid.h:25` (`odid_basic_id`)
+`odid_basic_id(const uint8_t *msg, char out[21])` unconditionally reads `msg[2..21]` (`for (int i = 0; i < 20; i++) { char c = (char)msg[2 + i]; ... }`) — it takes no `len` parameter and never checks that `msg` actually holds 22 bytes. `odid_msg_type`/`le_i32`/`odid_coord` are the other entry points in this file and don't validate length either, but `odid_basic_id` is the one that walks a fixed 20-byte span. It isn't wired into any tool today (per the existing 2026-10-10 entry noting "drone spotter" never calls this decoder), but that entry's own fix is to start feeding it real OpenDroneID frames pulled from BLE/WiFi NAN advertisements — attacker-influenced radio data of unpredictable length. The day that happens, a Basic ID message shorter than 22 bytes (truncated capture, malformed/spoofed frame) turns this into an out-of-bounds read. Add a `size_t len` parameter and bail (writing `out[0]=0`) if `len < 22`, mirroring the bounds checks `ntag215_is_amiibo`/`ntag215_uid_valid` already use in `amiibo.h`.
+**Effort:** S
