@@ -779,3 +779,25 @@ These five `static void tool_*(lv_obj_t*);` forward declarations exist in the fu
 **File/function:** `src/droneid.h:25` (`odid_basic_id`)
 `odid_basic_id(const uint8_t *msg, char out[21])` unconditionally reads `msg[2..21]` (`for (int i = 0; i < 20; i++) { char c = (char)msg[2 + i]; ... }`) — it takes no `len` parameter and never checks that `msg` actually holds 22 bytes. `odid_msg_type`/`le_i32`/`odid_coord` are the other entry points in this file and don't validate length either, but `odid_basic_id` is the one that walks a fixed 20-byte span. It isn't wired into any tool today (per the existing 2026-10-10 entry noting "drone spotter" never calls this decoder), but that entry's own fix is to start feeding it real OpenDroneID frames pulled from BLE/WiFi NAN advertisements — attacker-influenced radio data of unpredictable length. The day that happens, a Basic ID message shorter than 22 bytes (truncated capture, malformed/spoofed frame) turns this into an out-of-bounds read. Add a `size_t len` parameter and bail (writing `out[0]=0`) if `len < 22`, mirroring the bounds checks `ntag215_is_amiibo`/`ntag215_uid_valid` already use in `amiibo.h`.
 **Effort:** S
+
+## 2026-10-30
+
+### 1. "Claude usage" meter is a fully built screen that the menu can never reach
+**File/function:** `src/main.cpp:1391` (`tool_usage`) vs. `src/main.cpp:276` (`CATS[...]` entry `{"CL", "Claude usage", "5h & weekly meter", K_SOON, nullptr}`)
+`tool_usage()` is a complete, working panel — percent-used label, color-coded bar (`usage_pct`), and a "resets in %s" countdown via `fmt_hms` (`src/usage_fmt.h`) — but the category table wires this menu row to `nullptr` instead of `tool_usage`. `build_tool()` (`src/main.cpp:2403-2412`) falls back to `tool_generic()` (the generic "> live data lands next milestone" placeholder) whenever `t.render` is null, so clicking "Claude usage" can never reach the screen that already exists for it; it's dead code, reachable only by changing that one table entry. Unlike the other two legitimate `K_SOON`/`nullptr` rows next to it ("Meshtastic" — needs a LoRa add-on that doesn't exist; "Phone + web" — no companion app yet), this one has nothing hardware-blocking left to finish.
+**Effort:** S
+
+### 2. "Calendar" only ever shows the single first event in the phone-synced file, with no way to see the rest
+**File/function:** `src/main.cpp:1439` (`tool_calendar`) vs. `src/ical.h:47` (`ical_next_event`)
+`tool_calendar()` reads `/me/calendar.txt` and calls `ical_next_event(buf, when, ..., title, ...)`, which by design (its own comment: "for the first line with a valid start time") stops at the first parseable `YYYYMMDDThhmmss` line and returns. There's no loop over multiple events, no "next" action, and no filtering by current time — if the phone bridge writes several upcoming events (exactly what a calendar sync would do), the screen always shows the same first line in the file regardless of whether it's already in the past, with no rotate/click wired to advance to the next one. Compare to `tool_tasks` just above it, which does walk every line of its own phone-synced file. Worth a cycle-through (rotate = next event, matching the rest of the UI's input model) once the BLE/phone bring-up lands.
+**Effort:** M
+
+### 3. `subghz_capture_poll` carries a 1200-byte worst-case buffer on every 50 ms UI-task poll during a capture
+**File/function:** `src/radio_cc1101.cpp:84` (`subghz_capture_poll`), called every 50 ms by `subghz_poll_cb` while `tool_subghz_capture` (`src/main.cpp:946`) is open
+`subghz_capture_poll()` declares `uint32_t buf[SGX_MAX]` (`SGX_MAX` = 300 → 1200 bytes) as a local array on every call. The copy from the ISR's ring buffer only happens once `s_cnt >= 50`, but the 1.2 KB stack frame itself is paid on every single call — 20×/second on the UI task for as long as Capture & replay stays open — sized for the worst case (`SGX_MAX`) rather than what's actually pending. Moving `buf` to a function-static (there's only ever one capture in flight) would shrink this call's stack footprint from ~1.2 KB to a few bytes.
+**Effort:** S
+
+### 4. `ir_send_flipper` silently drops RC5 even though `IRsend` already supports it
+**File/function:** `src/ir_remote.cpp:61` (`ir_send_flipper`)
+`ir_send_flipper()` maps `NEC`/`NECext`/`NEC42`, `Samsung32`, `SIRC`/`SIRC15`/`SIRC20`, and `RC6` to an `IRsend` call; every other protocol string — including `RC5`, which `IRsend` supports natively via `sendRC5`/`encodeRC5` and which shows up on plenty of the same universal-remote-class devices NEC/RC6 target — falls through to `return false` with no feedback distinguishing "unsupported protocol" from any other failure, so a loaded RC5 `.ir` record silently does nothing on blast. Add an `RC5` branch (`irsend.sendRC5(irsend.encodeRC5(a16, fp->cmd[0]))`, mirroring the existing `RC6` branch one case above it) before tackling the harder raw-timing case this function already punts on.
+**Effort:** S
