@@ -801,3 +801,53 @@ These five `static void tool_*(lv_obj_t*);` forward declarations exist in the fu
 **File/function:** `src/ir_remote.cpp:61` (`ir_send_flipper`)
 `ir_send_flipper()` maps `NEC`/`NECext`/`NEC42`, `Samsung32`, `SIRC`/`SIRC15`/`SIRC20`, and `RC6` to an `IRsend` call; every other protocol string — including `RC5`, which `IRsend` supports natively via `sendRC5`/`encodeRC5` and which shows up on plenty of the same universal-remote-class devices NEC/RC6 target — falls through to `return false` with no feedback distinguishing "unsupported protocol" from any other failure, so a loaded RC5 `.ir` record silently does nothing on blast. Add an `RC5` branch (`irsend.sendRC5(irsend.encodeRC5(a16, fp->cmd[0]))`, mirroring the existing `RC6` branch one case above it) before tackling the harder raw-timing case this function already punts on.
 **Effort:** S
+
+## 2026-10-31
+
+### 1. `platformio.ini` leaves `platform = espressif32` unpinned while the code uses Arduino-ESP32 2.x-only APIs
+**File/function:** `platformio.ini:5`, vs. `src/main.cpp:2709` (`esp_task_wdt_init(WDT_TIMEOUT_S, true)`) and `src/ble_scan.cpp:ble_scan_async` (`sc->start(seconds, scan_done_cb, false)` with a `BLEScanResults`-by-value callback)
+Every `lib_deps` entry is version-ranged, but the platform itself is not, so a fresh
+checkout resolves to whatever `espressif32` is newest. The watchdog call at
+`main.cpp:2709` uses the two-argument 2.x signature and the BLE scan uses the 2.x
+callback overload; Arduino-ESP32 3.x changed both (config-struct WDT init, different
+BLE scan API), so a clean build on a newer platform can fail or silently change
+behaviour. Pin to a known-good release (e.g. `espressif32 @ 6.x`) and note it in BRINGUP.md.
+**Effort:** S
+
+### 2. `ble_scan_async` ignores the return of `BLEScan::start`, so one failed start wedges every BLE tool until reboot
+**File/function:** `src/ble_scan.cpp:ble_scan_async` (sets `s_scanning = true`, then calls `sc->start(...)` unchecked); consumers `src/main.cpp:ble_poll_cb` (1702) and the other `ble_scan_complete()` pollers
+`s_scanning` is only cleared inside `scan_done_cb`. If `start()` returns false (stack
+busy/not ready) the callback never fires, `s_scanning` stays true, and every later
+`ble_scan_async` returns immediately at `if (s_scanning) return;`. `ble_poll_cb` then
+polls `ble_scan_complete()` forever with the radar animation running and no way out
+but a reboot. Fix: check the result, reset `s_scanning`, set `s_scan_done` with
+`s_count = 0` so the existing "nothing advertising nearby" path shows and click=rescan works.
+**Effort:** S
+
+### 3. `wifi_poll_cb` reports a failed scan (`-2`) as "no networks found"
+**File/function:** `src/main.cpp:wifi_poll_cb` (1177) vs. `src/wifi_scan.cpp:wifi_scan_complete`
+`wifi_poll_cb` returns only on `n == -1` and then folds every `n <= 0` into "no networks
+found". `WiFi.scanComplete()` returns `WIFI_SCAN_FAILED` (-2) when the scan could not
+run, which is indistinguishable from an empty band on this screen. The sibling
+`camera_poll_cb` (~1749) already has a distinct "scan failed" branch, so the two
+screens disagree. Add a `n < 0` branch with its own label (and a retry hint) in
+`wifi_poll_cb`.
+**Effort:** S
+
+### 4. Every `storage_save` caller labels any failure "no SD card", including a full 10000-file directory
+**File/function:** `src/storage.cpp:storage_save` (returns `""` for not-ready, bad kind, `seq >= 10000`, `sp_make_path` failure and `SD.open` failure alike); callers `src/main.cpp:subghz_save_action` (902), `nfc_save_action` (1078), `wifi_save_action` (1165), `ir_save_action` (1641), `fwdump_action` (2052)
+All five callers test `path[0]` and print "no SD card" otherwise. Once a kind reaches
+sequence 9999, `storage_save` returns `""` on every later save, so a user with a
+mounted card is told it is missing, and the capture is lost. Return a small
+status/enum (or set a `storage_last_error()` string) so the screens can say "card full
+(10000 files)" vs "no SD card" vs "open failed".
+**Effort:** S
+
+### 5. Universal-remote TV entries carry `vol_up`/`vol_dn` codes that nothing reads, and the blast result is discarded
+**File/function:** `src/irdb.h:IR_BRANDS` (`vol_up`, `vol_dn`; Sony's are `0, 0`), `src/main.cpp:ir_blast_action` (1587) and `ir_brand_edit_cb` (1551)
+A repo-wide grep finds `vol_up`/`vol_dn` only in `irdb.h` itself: the screen shows and
+sends `b->power` only. `ir_blast_action` also drops the bool returned by `ir_send`, so a
+send that fails (unsupported protocol) gives no feedback. Use ACTION to cycle
+POWER/VOL+/VOL- (skipping zero codes, so Sony never sends a code 0) and show the
+`ir_send` result in the status line.
+**Effort:** S
