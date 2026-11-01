@@ -5,6 +5,13 @@ for Edgehax S3-PRO. Each entry below was produced by reading the actual source (
 guessed from names) and cites the exact file + function it targets. Entries are
 ideas for the owner to triage, not applied changes.
 
+## 2026-11-01
+
+### 1. Deauth monitor's promiscuous mode is never turned back off, and nothing arbitrates the shared WiFi radio between it, WiFi scan, and ESP-NOW
+**File/function:** `src/deauth_detect.cpp:20` (`deauth_begin`, `esp_wifi_set_promiscuous(true)`), vs. `src/wifi_scan.cpp:10` (`ensure_begin`, `WiFi.mode(WIFI_STA)` + `WiFi.scanNetworks(true)`) and `src/espnow_mesh.cpp:29` (`espnow_begin`, `WiFi.mode(WIFI_STA)`)
+`deauth_begin()` puts the radio into promiscuous RX mode and registers `promisc_cb` — there is no `deauth_end()`/`esp_wifi_set_promiscuous(false)` anywhere in the codebase (confirmed by grep across `src/`), so once "WiFi > Deauth detect" has been opened once, promiscuous mode stays latched on `s_on` for the rest of the boot. Meanwhile `wifi_scan_async()` calls `WiFi.mode(WIFI_STA)` again (which Arduino-ESP32 implements as a full `esp_wifi_stop`/`esp_wifi_start` cycle) and `WiFi.scanNetworks(true)`, and `espnow_begin()` also calls `WiFi.mode(WIFI_STA)` — none of these three call sites check `deauth_active()`/`s_on` or each other's state before touching the shared station interface. In practice: opening WiFi Scan or ESP-NOW Mesh after Deauth detect silently drops the promiscuous callback (and the deauth hit counter freezes with no indication why), and opening Deauth detect after a WiFi scan can leave the scan's active interface half-reconfigured. None of this is in `docs/BRINGUP.md`'s current unverified list. Fix: add a `deauth_end()` that disables promiscuous mode and clears `s_on`, and have each of the three WiFi-mode entry points check/clear the others' "is the radio already claimed for something else" state (a single `wifi_owner` enum would do) instead of each independently assuming it owns `WiFi.mode()`.
+**Effort:** M
+
 ## 2026-10-01
 
 ### 1. `tool_nrf_scan` blocks the UI task on first entry into Band Scanner
