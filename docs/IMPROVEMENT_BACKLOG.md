@@ -858,3 +858,17 @@ send that fails (unsupported protocol) gives no feedback. Use ACTION to cycle
 POWER/VOL+/VOL- (skipping zero codes, so Sony never sends a code 0) and show the
 `ir_send` result in the status line.
 **Effort:** S
+
+## 2026-11-04
+
+### 1. `espnow_frame`'s 250-byte text cap lets it build frames bigger than ESP-NOW's own payload limit, so near-max-length messages silently fail to send
+**File/function:** `src/espnow_msg.h:espnow_frame` (`if (len > 250 ...)`), called from `src/espnow_mesh.cpp:espnow_broadcast` (`esp_now_send(BCAST, f, n)`, return value discarded)
+
+`espnow_frame` only rejects text longer than 250 bytes, but its own output is `len + 3` bytes (magic + length + payload + checksum) — a 248-250 char message produces a 251-253 byte frame. ESP-NOW's `esp_now_send` hard-caps the payload at 250 bytes (`ESP_ERR_ESPNOW_ARG` above that), so any message in that 3-byte window builds successfully, passes `espnow_frame`'s own bound check, and is then silently dropped by `esp_now_send` — whose return `espnow_broadcast` never checks. The mesh looks like it's working (same failure shape already flagged for `espnow_begin`'s peer-add in the 2026-10-15 entry) but near-max-length broadcasts never arrive. Fix: cap `len` at 247 (or whatever leaves `len+3 <= 250`) in `espnow_frame`, and check `esp_now_send`'s return in `espnow_broadcast`.
+**Effort:** S
+
+### 2. `subghz_capture()` is a fully synchronous, UI-task-blocking wrapper that nothing calls — but reintroduces the exact blocking-scan bug class if anyone wires it up
+**File/function:** `src/radio_cc1101.cpp:112` (`subghz_capture`, `while (millis() - start < timeout_ms) { ...; delay(10); }`), vs. the only real caller path `src/main.cpp:946` (`tool_subghz_capture`), which uses `subghz_capture_begin`/`subghz_capture_poll`/`subghz_capture_end` directly and never calls `subghz_capture()` at all
+
+A repo-wide search for `subghz_capture(` (the blocking wrapper, as opposed to `subghz_capture_begin`/`_poll`/`_end`) turns up zero call sites — `tool_subghz_capture` already does the correct async pattern (an `lv_timer_create`-driven `subghz_poll_cb` at 50 ms calling `subghz_capture_poll`), exactly the pattern this scan was asked to verify across tools. `subghz_capture()` itself, though, is a `timeout_ms`-bounded `while`+`delay(10)` loop that blocks whatever task calls it for up to the full timeout — the same shape as the `ble_scan`-based blocking bug fixed twice already. It's dead code today, but it sits in the public header (`radio_cc1101.h`) inviting a future caller (e.g. a quick "blocking capture" shortcut) to reintroduce the exact bug class on the sub-GHz radio. Fix: delete `subghz_capture()` (and its declaration) now that nothing uses it, or clearly mark it host-test-only/non-UI-task in a comment so it isn't mistaken for the screen's real entry point.
+**Effort:** S
