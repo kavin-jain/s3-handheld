@@ -872,3 +872,30 @@ POWER/VOL+/VOL- (skipping zero codes, so Sony never sends a code 0) and show the
 
 A repo-wide search for `subghz_capture(` (the blocking wrapper, as opposed to `subghz_capture_begin`/`_poll`/`_end`) turns up zero call sites — `tool_subghz_capture` already does the correct async pattern (an `lv_timer_create`-driven `subghz_poll_cb` at 50 ms calling `subghz_capture_poll`), exactly the pattern this scan was asked to verify across tools. `subghz_capture()` itself, though, is a `timeout_ms`-bounded `while`+`delay(10)` loop that blocks whatever task calls it for up to the full timeout — the same shape as the `ble_scan`-based blocking bug fixed twice already. It's dead code today, but it sits in the public header (`radio_cc1101.h`) inviting a future caller (e.g. a quick "blocking capture" shortcut) to reintroduce the exact bug class on the sub-GHz radio. Fix: delete `subghz_capture()` (and its declaration) now that nothing uses it, or clearly mark it host-test-only/non-UI-task in a comment so it isn't mistaken for the screen's real entry point.
 **Effort:** S
+
+## 2026-11-05
+
+### 1. The MCP23017 button expander is probed exactly once at boot with no retry, so one failed probe leaves the device with no click or buttons until reboot
+**File/function:** `src/main.cpp:setup()` (`mcp_ok = mcp.begin_I2C(MCP_ADDR, &Wire);`, ~line 2789), `src/main.cpp:poll_buttons` (`if (!mcp_ok) return;`)
+`mcp_ok` is assigned once, immediately after `Wire.begin(...)`, and is never re-evaluated. Every consumer (`poll_buttons`, `click_tick`, the `gpio_wakeup_enable` calls in the sleep path) bails when it is false, and the encoder click (`MCP_ENC_SW`) and all four buttons come through that same chip, so after a missed probe the UI is rotate-only: nothing can be selected or confirmed. The repo already added a retry for the PN532 (`nfc_retry_poll_cb`) after the same I2C-startup race, but the expander that gates all input never got one. Fix: in `poll_buttons`, when `!mcp_ok` retry `mcp.begin_I2C` every ~1 s (re-running the pin/interrupt setup block), instead of returning.
+**Effort:** S
+
+### 2. `camera_poll_cb` reports "scan failed" when the scan succeeded and simply found zero networks
+**File/function:** `src/main.cpp:camera_poll_cb` (`make_label(..., n > 0 ? "no camera-like WiFi APs" : "scan failed", ...)`)
+`wifi_scan_complete()` returns `WiFi.scanComplete()` directly (`src/wifi_scan.cpp`), so `n == 0` means a finished scan that saw no APs and only a negative value is an error. The ternary labels both `0` and `-2` as "scan failed", so a clean result in an empty RF environment tells the user the check did not run, which is the wrong message for a safety ("Am I safe?") screen. (`wifi_poll_cb` has the opposite mislabel and is a separate entry.) Fix: three-way label: `n < 0` -> "scan failed", `n == 0` -> "no WiFi networks seen", else the current text.
+**Effort:** S
+
+### 3. A non-numeric `pin=` (or any numeric key) in config.txt is silently read as `0`, which counts as a valid PIN
+**File/function:** `src/config.h:cfg_int_after` (`return atoi(p + kl + 1);`), consumed in `src/main.cpp:setup()` config-restore block
+`cfg_int_after` uses bare `atoi`, which returns `0` for text like `pin=`, `pin=abc` or a corrupted byte. The existing range check in `setup()` accepts `0` (it only rejects `<0` other than `-1`, or `>9999`), and `lock_configured()` treats `pin >= 0` as set, so a damaged line locks the device behind PIN `0000` that the owner never chose. The same path turns `bright=abc` into brightness 0, then clamped to 10%. Fix: parse with `strtol` plus an end-pointer check and return `def` when no digits were consumed. This is pure logic, so add the garbage-value cases to `test/test_config.cpp`.
+**Effort:** S
+
+### 4. `ducky_parse` eats leading spaces after `STRING`, and `badusb_run_line` silently drops everything past 127 characters
+**File/function:** `src/ducky.h:ducky_starts` (`while (*r == ' ') r++;`), `src/badusb.cpp:badusb_run_line` (`char arg[128];`)
+`ducky_starts` skips every space after the keyword, so `STRING     indented` or a line that is only spaces types nothing/less than written. `badusb_run_line` passes a 128-byte `arg` to `ducky_parse`, whose copy loop stops at `cap - 1`, so a `STRING` line longer than 127 characters (a long URL, a PowerShell one-liner) is typed truncated with no error. `ducky_run_action` reads up to 2048 bytes, so long lines are normal input. Fix: skip only the single separator space for `STRING` (DuckyScript semantics), and either size `arg` to the line or loop over chunks. Both are host-testable in `ducky.h` and `test/test_ducky.cpp`.
+**Effort:** S
+
+### 5. SD file pickers list dot-files and directories, and silently truncate any path longer than 63 characters
+**File/function:** `src/storage.cpp:storage_nth_file` (`static char path[64]`, `snprintf(path, sizeof path, "%s/%s", dir, base)`), `src/storage.cpp:storage_count_files`
+Neither function checks `e.isDirectory()` or skips names starting with `.`. macOS and some Windows tools leave `._payload.txt` / `._remote.ir` AppleDouble stubs on SD cards, and a folder named `x.ir` also matches, so the BadUSB (`/ducky`) and IR (`/ir`) pickers show entries that are not real payloads. Running one feeds binary junk to `badusb_run_line` or the `.ir` parser. Separately, `storage_nth_file` builds the path in a 64-byte buffer, so a long-but-legal FAT filename (over about 56 characters under `/ducky/`) is cut mid-name and `storage_read_file` then fails with no message. Fix: skip directories and `.`-prefixed names in both functions (keep the two counts consistent) and enlarge `path`. A `storage_paths.h`-style pure filter would make it host-testable.
+**Effort:** S
