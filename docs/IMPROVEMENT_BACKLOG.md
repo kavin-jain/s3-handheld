@@ -5,6 +5,23 @@ for Edgehax S3-PRO. Each entry below was produced by reading the actual source (
 guessed from names) and cites the exact file + function it targets. Entries are
 ideas for the owner to triage, not applied changes.
 
+## 2026-11-06
+
+### 1. `poll_buttons` polls the MCP23017 over I2C every 30 ms forever, even though its hardware interrupt line is already wired and configured
+**File/function:** `src/main.cpp:564` (`poll_buttons`, `uint8_t pressed = (~mcp.readGPIOA()) & 0x0f;`), vs. `src/main.cpp:2792-2796` (`setup()`: `mcp.setupInterrupts(true, false, LOW)`, `mcp.setupInterruptPin(p, CHANGE)` for every pin, `pinMode(PIN_MCP_INT, INPUT_PULLUP)`)
+`setup()` fully configures the MCP23017's own interrupt-on-change hardware (mirrored, push-pull, active-low) and wires `PIN_MCP_INT` as an input specifically so button/click/encoder-switch changes can be detected without polling. But `poll_buttons` — the `lv_timer_create(poll_buttons, 30, NULL)` registered right after — never reads `PIN_MCP_INT` at all (confirmed by grep: it's read nowhere outside the `esp_light_sleep_start()` wake-gating block at lines 465/480). Instead it unconditionally issues a full `mcp.readGPIOA()` I2C transaction every single 30 ms tick, forever, including through `PM_DIM` (only `PM_SLEEP`'s light-sleep path stops it, by halting the whole CPU). That's ~33 I2C reads/sec for the device's entire active+dimmed lifetime to detect input the interrupt line was built to flag directly. Fix: gate the `readGPIOA()` call on `digitalRead(PIN_MCP_INT) == LOW` (it's active-low) instead of calling it unconditionally — same shape as the encoder's own interrupt-driven `enc_isr`/`enc_rearm_tick` right above it in the file.
+**Effort:** S
+
+### 2. `cc1101_begin` is probed exactly once at boot with no retry, so a missed probe leaves every Sub-GHz tool reporting "not detected" until reboot
+**File/function:** `src/radio_cc1101.cpp:15` (`cc1101_begin`), called once from `src/main.cpp:2751-2753` (`setup()`); gated on everywhere via `cc1101_present()`
+`cc1101_begin()` calls `ELECHOUSE_cc1101.Init()` then reads `getCC1101()` once to set the file-scope `s_present` latch, and nothing in the codebase calls `cc1101_begin()` a second time — every Sub-GHz screen (`tool_freq_finder`, `tool_subghz_capture`, `tool_df`, `tool_audiobug`, `tool_ism`, `tool_wmbus`) only ever reads the latched `cc1101_present()`. This is the same shape as the MCP23017 (2026-11-05 #1) and MAX17048 battery gauge (2026-10-18 #3) boot-probe-with-no-retry gaps already tracked, just on the CC1101's own SPI-B bus instead of I2C — a slow-to-power-up module, a marginal solder joint, or `radio_task_start()` (also called in `setup()`, right before `cc1101_begin()` in program order but running on its own core) touching SPI-B at just the wrong moment can make this one `Init()`/`getCC1101()` call fail, and every Sub-GHz tool then reads "not detected" for the rest of the session with no recovery path short of a reboot. Fix: same shape as the planned `nfc_retry_poll_cb`/MCP23017 fixes — retry `cc1101_begin()` on a slow timer (or an explicit "retry" action on the Sub-GHz screens) until it succeeds.
+**Effort:** S
+
+### 3. `ui_anim_stop` is a published, documented API that has zero callers anywhere in the firmware
+**File/function:** `src/ui_anim.cpp:67` (`ui_anim_stop`), declared in `src/ui_anim.h`
+`ui_anim_radar_create`/`ui_anim_waves_create` are called nine times across `main.cpp` for every scan-style tool's spinner, and all nine rely on the parent panel being torn down via `lv_obj_clean(box)`/`lv_obj_del` when the screen repaints — LVGL's own object-delete path cancels any `lv_anim_t` still targeting a deleted object, which is why this already works without an explicit stop. `ui_anim_stop(lv_obj_t*)` was written as the "proper" teardown call for both animation helpers but a repo-wide grep for `ui_anim_stop` turns up only its own definition and declaration — no call site in `main.cpp` or anywhere else ever uses it. It's not wrong, just dead: a published function nobody reaches, sitting next to the two helpers that actually get used every time a scan screen opens. Fix: either wire it into the `g_cleanup_cb` path those nine call sites already use (making teardown explicit instead of incidental) or delete it along with its header declaration.
+**Effort:** S
+
 ## 2026-11-01
 
 ### 1. Deauth monitor's promiscuous mode is never turned back off, and nothing arbitrates the shared WiFi radio between it, WiFi scan, and ESP-NOW
