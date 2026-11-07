@@ -5,6 +5,28 @@ for Edgehax S3-PRO. Each entry below was produced by reading the actual source (
 guessed from names) and cites the exact file + function it targets. Entries are
 ideas for the owner to triage, not applied changes.
 
+## 2026-11-07
+
+### 1. Universal Remote's A/C entries always show "Cool" and have no fan-speed UI — `ac_fan_name`/`AcFan` are entirely unused
+**File/function:** `src/ac_state.h:8,24` (`enum AcFan`, `ac_fan_name`), vs. `src/main.cpp:1563-1564` (`ir_brand_edit_cb`, `ac_mode_name(AC_COOL)` hardcoded)
+`ac_state.h` defines a full `AcMode` enum (Cool/Heat/Dry/Fan/Auto) and a separate `AcFan` enum (Auto/Low/Med/High) with its own `ac_fan_name()` labeler — both tested in `test/test_ac_state.cpp`. But the only call site, `ir_brand_edit_cb`'s A/C branch, always passes the literal `AC_COOL` to `ac_mode_name()` and never reads or displays a fan speed at all: `ac_fan_name` and the whole `AcFan` enum have zero callers anywhere in `src/main.cpp` (confirmed by grep — only `ac_mode_name`/`ac_clamp_temp` are used). So every one of the 2 A/C brands always shows "Cool NN°C" regardless of what mode a real unit would be in, and the fan-speed concept this file was built to support has no UI path to set or show it. Fix: add a second rotary-adjustable field (mode, fan) alongside the existing temp bump on `ir_ac_temp_bump`, or drop the unused enum/labeler if A/C mode cycling isn't planned yet.
+**Effort:** S
+
+### 2. WiFi scan list prints raw dBm but never converts to the signal-bar scale `wifi_quality()` exists for
+**File/function:** `src/wifi_fmt.h:6` (`wifi_quality`), vs. `src/main.cpp:1196-1199` (`wifi_poll_cb`'s render loop: `snprintf(line, ..., wifi_ssid(i), wifi_enc_str(enc), wifi_rssi(i))`)
+`wifi_fmt.h` ships three pure helpers for the WiFi scan screen — `wifi_enc_str`, `wifi_is_open`, and `wifi_quality` (dBm → 0..4 bars) — all tested in `test/test_wifi_fmt.cpp`. The render loop calls `wifi_enc_str` and `wifi_is_open` but never calls `wifi_quality` anywhere in `src/main.cpp` (confirmed by grep: zero matches outside the header/test); each row just shows the raw `"%d dBm"` number with no bar/quality indicator, even though the exact function to turn that into the kind of "signal strength" glyph a Flipper-style UI usually shows already exists and is already correct. Fix: render `wifi_quality(wifi_rssi(i))` as a short bar/dot indicator next to each SSID row instead of (or alongside) the raw dBm.
+**Effort:** S
+
+### 3. `ir_first_byte` is fully orphaned — `flipper_ir.h`'s own byte parser reimplements the same two-hex-digit decode inline instead of reusing it
+**File/function:** `src/ir_codes.h:36` (`ir_first_byte`), vs. `src/flipper_ir.h:30-40` (`flipper_bytes`, `int hi = ir_hexval(s[0]); ... int lo = ir_hexval(s[1]);`)
+`ir_codes.h` defines `ir_first_byte()` specifically to decode one Flipper-style hex byte ("04 00 00 00" → 0x04) and is tested in `test/test_ir_codes.cpp`, but grepping the whole tree shows it is never called from any other file — not `flipper_ir.h` (which needs exactly this operation for every byte in an address/command field), not `main.cpp`. Instead `flipper_ir.h:flipper_bytes()` hand-rolls the identical `ir_hexval(s[0])`/`ir_hexval(s[1])` pair itself, byte by byte, in its own loop. So the codebase carries two copies of the same 2-hex-digit decode (one dead, one live) that could silently drift apart if either is changed later. Fix: either delete `ir_first_byte` as dead code, or have `flipper_bytes` call it per byte and delete the duplicate inline logic.
+**Effort:** S
+
+### 4. `i2c_addr7`/`i2c_is_read` are unused — the live I2C scan never decodes a byte because it builds 7-bit addresses directly
+**File/function:** `src/buspirate.h:8-9` (`i2c_addr7`, `i2c_is_read`), vs. `src/main.cpp:2121` (`i2c_scan_paint`, `for (uint8_t a = 0x08; a <= 0x77 ...) { Wire.beginTransmission(a); ... found[nfound++] = a; }`)
+`buspirate.h`'s header comment frames the tool as walking addresses and "decod[ing] an address byte," and ships `i2c_addr7()`/`i2c_is_read()` for that (tested in `test/test_buspirate.cpp`). But `i2c_scan_paint()` already iterates `a` as a bare 7-bit address (0x08..0x77) and calls `Wire.beginTransmission(a)` directly — there is no 8-bit byte-with-R/W-bit anywhere in this path, so those two decode helpers have no real caller; only `i2c_device_name()` is used. They're dead code kept alive solely by their own test. Fix: drop the two unused helpers (and the "decode an address byte" framing in the header comment), or, if a lower-level raw-byte sniff mode is actually planned, wire it up and use them there.
+**Effort:** S
+
 ## 2026-11-06
 
 ### 1. `poll_buttons` polls the MCP23017 over I2C every 30 ms forever, even though its hardware interrupt line is already wired and configured
